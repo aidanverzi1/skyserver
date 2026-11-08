@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "skyserver",
+  "version": "${version}",
+  "name": "skyserver",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/skyserver/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "com.aidan.skyserver.Skyserver"
+    ]
+  },
+  "mixins": [
+    "skyserver.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
