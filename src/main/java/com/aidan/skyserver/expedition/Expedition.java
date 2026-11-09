@@ -784,6 +784,41 @@ public final class Expedition {
         return r.floorCenter();
     }
 
+    /**
+     * 5.12: the closest spot to `near` (inside the room) with solid floor and open air `half` blocks
+     * around and `height` blocks up - so a big mob doesn't spawn inside a pillar or a wall. Falls back
+     * to a normal free floor spot, then to `near`.
+     */
+    private static BlockPos bigSpot(ServerLevel level, ExpeditionRooms.Room r, BlockPos near, int half, int height) {
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int rad = 0; rad <= 12; rad++) {
+            for (int dx = -rad; dx <= rad; dx++) {
+                for (int dz = -rad; dz <= rad; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != rad) continue; // just the ring at this distance
+                    int x = near.getX() + dx, z = near.getZ() + dz;
+                    if (x - half < r.x0 || x + half > r.x1 || z - half < r.z0 || z + half > r.z1) continue;
+                    for (int y = Math.max(r.y0, near.getY() - 2); y <= Math.min(r.y1 - height, near.getY() + 3); y++) {
+                        if (clearBox(level, m, x, y, z, half, height)) return new BlockPos(x, y, z);
+                    }
+                }
+            }
+        }
+        for (int tries = 0; tries < 30; tries++) {
+            BlockPos s = roomSpot(level, r);
+            if (clearBox(level, m, s.getX(), s.getY(), s.getZ(), Math.min(half, 1), Math.min(height, 3))) return s;
+        }
+        return near;
+    }
+
+    private static boolean clearBox(ServerLevel level, BlockPos.MutableBlockPos m, int x, int y, int z, int half, int height) {
+        if (!level.getBlockState(m.set(x, y - 1, z)).isFaceSturdy(level, m, net.minecraft.core.Direction.UP)) return false;
+        for (int dx = -half; dx <= half; dx++)
+            for (int dz = -half; dz <= half; dz++)
+                for (int dy = 0; dy < height; dy++)
+                    if (!level.getBlockState(m.set(x + dx, y + dy, z + dz)).getCollisionShape(level, m).isEmpty()) return false;
+        return true;
+    }
+
     /** 5.11: a spot up high (balconies, walkways, broken pillar tops), or a floor spot if there's none. */
     private static BlockPos highSpot(ServerLevel level, ExpeditionRooms.Room r) {
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
@@ -904,9 +939,14 @@ public final class Expedition {
     private static void captain(ServerLevel level, Run run, ExpeditionRooms.Room r) {
         int d = run.diff;
         EntityType<? extends Mob> type = run.fortress ? net.minecraft.world.entity.EntityTypes.WITHER_SKELETON : net.minecraft.world.entity.EntityTypes.PIGLIN_BRUTE;
-        BlockPos spot = r.doorsIn.isEmpty() ? roomSpot(level, r) : r.doorsIn.get(RNG.nextInt(r.doorsIn.size()));
+        // 5.12: by a doorway, but on a clear spot (a 1.3x brute doesn't fit everywhere).
+        BlockPos door = r.doorsIn.isEmpty() ? r.floorCenter() : r.doorsIn.get(RNG.nextInt(r.doorsIn.size()));
+        BlockPos spot = bigSpot(level, r, door, 1, 4);
         Mob m = spawnGuard(level, run, r, type, false, spot);
-        if (m == null) return;
+        if (m == null) {
+            Skyserver.LOGGER.warn("[Expedition] the {} could not be created", run.fortress ? "Wither Knight" : "Brute Warlord");
+            return;
+        }
         gear(level, run, m, false);
         Item weapon = run.fortress ? (d >= 2 ? Items.NETHERITE_SWORD : Items.DIAMOND_SWORD) : (d >= 2 ? Items.NETHERITE_AXE : Items.DIAMOND_AXE);
         equip(m, EquipmentSlot.MAINHAND, enchanted(level, weapon, Enchantments.SHARPNESS, d + 1));
@@ -923,6 +963,8 @@ public final class Expedition {
         m.setCustomName(Component.literal(nm));
         m.setCustomNameVisible(true);
         m.setGlowingTag(true);
+        Skyserver.LOGGER.info("[Expedition] {} spawned at {} {} {} ({} HP)", run.fortress ? "Wither Knight" : "Brute Warlord",
+                spot.getX(), spot.getY(), spot.getZ(), Math.round(m.getMaxHealth()));
         level.playSound(null, m.blockPosition(), SoundEvents.ENDER_DRAGON_GROWL, SoundSource.HOSTILE, 1.2f, 1.4f);
         for (ServerPlayer p : inside(run))
             if (r.inside(p.getX(), p.getY(), p.getZ(), 1)) Announce.title(p, nm, "§7leads the last wave!", 5, 40, 10);
@@ -1060,8 +1102,14 @@ public final class Expedition {
         if (run.bossSpawned || run.over) return;
         run.bossSpawned = true;
         ExpeditionRooms.Room arena = run.layout.arena;
-        Mob body = spawnGuard(level, run, arena, ExpeditionBoss.hitboxType(run.fortress), true, arena.floorCenter());
-        if (body == null) return;
+        // 5.12: a clear spot near the middle (the 2.3-2.4x hidden body needs room, away from pillars and cover).
+        BlockPos at = bigSpot(level, arena, arena.floorCenter(), 2, 6);
+        Mob body = spawnGuard(level, run, arena, ExpeditionBoss.hitboxType(run.fortress), true, at);
+        if (body == null) {
+            Skyserver.LOGGER.warn("[Expedition] the {} could not be created - trying again in a moment", ExpeditionBoss.name(run.fortress));
+            run.bossSpawned = false;
+            return;
+        }
         run.boss = body.getUUID();
         run.fight = ExpeditionBoss.start(level, body, run.fortress, run.diff, Math.max(1, run.inside.size()), arena, run.layout.pillarSpots, new ExpeditionBoss.Hooks() {
             @Override
@@ -1490,6 +1538,17 @@ public final class Expedition {
             if (!r.active() || r.waveComing || r.wave >= r.waves) continue;
             Long due = WAVE_DUE.get(r);
             if (due != null && ticks >= due) nextWave(nl, run, r);
+        }
+        // 5.12: the boss vanished without dying (removed, unloaded...): clear it so it comes back.
+        if (run.bossSpawned && !run.bossDead && run.fight != null && run.fight.over) {
+            Entity stray = run.boss == null ? null : nl.getEntity(run.boss);
+            Skyserver.LOGGER.warn("[Expedition] the {} disappeared without being killed (entity {}) - it will appear again",
+                    ExpeditionBoss.name(run.fortress), stray == null ? "gone" : stray.isAlive() ? "still there" : "dead");
+            if (stray != null) stray.discard();
+            if (run.boss != null) GUARD_OF.remove(run.boss);
+            run.boss = null;
+            run.fight = null;
+            run.bossSpawned = false;
         }
         // Rooms wake when someone walks in; the arena once it's open.
         List<ServerPlayer> players = inside(run);

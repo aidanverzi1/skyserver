@@ -17,6 +17,7 @@ import java.util.List;
  *  row 3: the four obstacle courses (5.8: boosters and daily streak in between)
  *  row 4: lobby activities (Spleef, Duels, Archery, Maze, Elytra Rings, Fishing)
  *  row 5: the key shop, the Shard Shop and the Cosmetic Shop (5.8)
+ * 5.12: screens opened from here (Shard Shop, Cosmetic Shop, Elytra courses) get a ◀ Back arrow.
  */
 public final class GameMenu extends LockedMenu {
     private static final int SKYWARS = 10, GOLDWARS = 11, BEDWARS = 12, BEDWARS_DUOS = 13, ISLAND = 14, HALL = 16;
@@ -35,6 +36,12 @@ public final class GameMenu extends LockedMenu {
 
     public static void open(ServerPlayer p) {
         LockedMenu.open(p, "§8Game Menu", 6, GameMenu::new);
+    }
+
+    /** 5.12: opens a screen from the compass with a Back arrow to the compass. */
+    private void sub(Runnable opener) {
+        ServerPlayer v = viewer;
+        Lobby.later(v, () -> LockedMenu.openWithBack(v, () -> GameMenu.open(v), opener));
     }
 
     private void draw() {
@@ -121,7 +128,7 @@ public final class GameMenu extends LockedMenu {
         box.setItem(DUELS, Stacks.named(new ItemStack(Items.IRON_SWORD), "§c§lDuel Arena", "§7Challenge someone: §e/duel <name> [bet]", "§7The winner takes the whole bet.", "§eClick to go there"));
         box.setItem(ARCHERY, Stacks.named(new ItemStack(Items.BOW), "§6§lArchery Range", "§760-second rounds.", "§7Score " + Activities.ARCHERY_REWARD_SCORE + "+ for §6" + Economy.format(Activities.ARCHERY_MONEY) + " §7(daily).", "§eClick to go there"));
         box.setItem(MAZE, Stacks.named(new ItemStack(Items.OAK_LEAVES), "§2§lHedge Maze", "§7Find the fountain in the middle.", "§7Daily reward §6" + Economy.format(Activities.MAZE_MONEY) + "§7.", "§eClick to go there"));
-        box.setItem(ELYTRA, Stacks.named(new ItemStack(Items.ELYTRA), "§d§lElytra Rings", "§7Fly through every ring, land on the pad.", "§7Daily reward §6" + Economy.format(Activities.ELYTRA_MONEY) + "§7.", "§eClick to go to the top of the tower"));
+        box.setItem(ELYTRA, Stacks.named(new ItemStack(Items.ELYTRA), "§d§lElytra Rings", "§7Fly through every ring, land on the pad.", "§7Daily reward §6" + Economy.format(Activities.ELYTRA_MONEY) + "§7.", "§eClick to pick a course"));
         box.setItem(FISHING, Stacks.named(new ItemStack(Items.FISHING_ROD), "§b§lFishing Pond", "§7Every catch pays a little.", "§7Any catch can be a key!", "§eClick to go there"));
         if (Lobby.SURVIVAL_OPEN) {
             box.setItem(SURVIVAL, Stacks.named(new ItemStack(Items.IRON_PICKAXE), "§a§lSurvival", "§7Back to your survival world,", "§7with your own inventory.", "§eClick to go"));
@@ -174,8 +181,8 @@ public final class GameMenu extends LockedMenu {
             case TOWN -> Lobby.later(viewer, () -> Activities.goTo(viewer, "town"));
             case MINE -> Lobby.later(viewer, () -> Activities.goTo(viewer, "mine"));
             case BOOSTERS -> Lobby.later(viewer, () -> Boosters.show(viewer));
-            case SHARDS -> Lobby.later(viewer, () -> ShardShop.open(viewer));
-            case CSHOP -> Lobby.later(viewer, () -> CosmeticShop.open(viewer));
+            case SHARDS -> sub(() -> ShardShop.open(viewer)); // 5.12: with a Back arrow
+            case CSHOP -> sub(() -> CosmeticShop.open(viewer)); // 5.12: with a Back arrow
             case SPLEEF -> Lobby.later(viewer, () -> Activities.goTo(viewer, "spleef"));
             case DUELS -> Lobby.later(viewer, () -> {
                 Activities.goTo(viewer, "duels");
@@ -183,7 +190,7 @@ public final class GameMenu extends LockedMenu {
             });
             case ARCHERY -> Lobby.later(viewer, () -> Activities.goTo(viewer, "archery"));
             case MAZE -> Lobby.later(viewer, () -> Activities.goTo(viewer, "maze"));
-            case ELYTRA -> Lobby.later(viewer, () -> Activities.goTo(viewer, "elytra"));
+            case ELYTRA -> sub(() -> Activities.goTo(viewer, "elytra")); // 5.12: the course picker gets a Back arrow
             case FISHING -> Lobby.later(viewer, () -> Activities.goTo(viewer, "pond"));
             case SURVIVAL -> {
                 if (Lobby.SURVIVAL_OPEN) Lobby.later(viewer, () -> Lobby.toSurvival(viewer));

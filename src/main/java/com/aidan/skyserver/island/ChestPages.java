@@ -57,11 +57,17 @@ import java.util.*;
  * confirm). A single chest gets +27 slots per page; a double chest buys for both halves at once (+54).
  * Broken chests keep their pages on the dropped chest item and get them back when placed.
  * Trapped chests, barrels, ender chests and everything else are unchanged.
+ *
+ * 5.12: the lid. Vanilla's chest only counts players looking at its OWN chest screen, so with our
+ * screen its count went wrong and the lid could stay open. We now open and close the lid ourselves
+ * (who is looking at each chest half, and the lid event + sound), and leave vanilla's counter alone.
  */
 public final class ChestPages {
     public static final int MAX_PAGES = 2;
     public static final long[] PRICES = {5_000, 10_000};
     private static final String TAG = "skyserver_pages";
+    /** 5.12: who has each chest half open (block position -> players). */
+    private static final Map<Long, Set<UUID>> VIEWERS = new HashMap<>();
 
     private ChestPages() {}
 
@@ -157,6 +163,41 @@ public final class ChestPages {
         int n = 0;
         for (BlockEntity be : halves(level, pos)) if (be instanceof ChestPagesAccess a) n = Math.max(n, a.skyserver$getPages());
         return n;
+    }
+
+    // ---- 5.12: the lid ----
+
+    /** Marks the player as looking into the chest, opens the lid (sound on the first viewer). Returns the halves used. */
+    private static List<BlockPos> lidOpen(ServerLevel level, BlockPos pos, Player p) {
+        List<BlockPos> at = new ArrayList<>();
+        for (BlockEntity be : halves(level, pos)) at.add(be.getBlockPos().immutable());
+        if (at.isEmpty()) at.add(pos.immutable());
+        if (p.isSpectator()) return at;
+        boolean first = false;
+        for (BlockPos h : at) {
+            Set<UUID> who = VIEWERS.computeIfAbsent(h.asLong(), k -> new HashSet<>());
+            if (who.add(p.getUUID()) && who.size() == 1) first = true;
+            level.blockEvent(h, Blocks.CHEST, 1, who.size()); // 1 = lid, value = how many are looking
+        }
+        if (first) level.playSound(null, pos, SoundEvents.CHEST_OPEN, SoundSource.BLOCKS, 0.5f, level.getRandom().nextFloat() * 0.1f + 0.9f);
+        return at;
+    }
+
+    /** The player stopped looking: the lid closes when nobody is left (sound on the last one). */
+    private static void lidClose(ServerLevel level, List<BlockPos> at, Player p) {
+        boolean last = false;
+        for (BlockPos h : at) {
+            Set<UUID> who = VIEWERS.get(h.asLong());
+            int left = 0;
+            if (who != null) {
+                if (who.remove(p.getUUID()) && who.isEmpty()) last = true;
+                left = who.size();
+                if (who.isEmpty()) VIEWERS.remove(h.asLong());
+            }
+            if (level.getBlockState(h).is(Blocks.CHEST)) level.blockEvent(h, Blocks.CHEST, 1, left);
+        }
+        if (last && !at.isEmpty() && level.getBlockState(at.get(0)).is(Blocks.CHEST))
+            level.playSound(null, at.get(0), SoundEvents.CHEST_CLOSE, SoundSource.BLOCKS, 0.5f, level.getRandom().nextFloat() * 0.1f + 0.9f);
     }
 
     // ---- Sorting ----
@@ -333,6 +374,8 @@ public final class ChestPages {
         final SimpleContainer buttons = new SimpleContainer(9);
         final int pageSize, buttonStart, invStart, invEnd;
         long confirmUntil = 0;
+        /** 5.12: the chest halves whose lid this screen opened. */
+        final List<BlockPos> lid;
 
         Menu(int id, Inventory inv, Container real, ServerLevel level, BlockPos pos, boolean big) {
             super(big ? MenuType.GENERIC_9x6 : MenuType.GENERIC_9x4, id);
@@ -350,7 +393,7 @@ public final class ChestPages {
             for (int r = 0; r < 3; r++) for (int c = 0; c < 9; c++) addSlot(new Slot(inv, 9 + r * 9 + c, 8 + c * 18, top + r * 18));
             for (int c = 0; c < 9; c++) addSlot(new Slot(inv, c, 8 + c * 18, top + 58));
             invEnd = slots.size();
-            real.startOpen(inv.player);
+            lid = lidOpen(level, pos, inv.player); // 5.12: was real.startOpen (vanilla's counter left the lid open)
             refreshButtons();
         }
 
@@ -459,7 +502,7 @@ public final class ChestPages {
         @Override
         public void removed(Player player) {
             super.removed(player);
-            real.stopOpen(player);
+            lidClose(level, lid, player); // 5.12: was real.stopOpen
         }
     }
 }

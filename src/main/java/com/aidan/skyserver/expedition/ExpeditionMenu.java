@@ -14,7 +14,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The Nether Expedition menus (5.8; 5.9 text updated for the chest rooms, the arena and the new vault).
+ * The Nether Expedition menus (5.8; 5.9 text updated for the chest rooms, the arena and the new vault;
+ * 5.12: the difficulty buttons describe the 5.11 guards, waves and boss).
  *  - CallMenu (from /is): call the airship with the deposit or a ticket.
  *  - HelmMenu (right-click Wren on the deck): Fortress / Bastion / Surprise and the difficulty.
  *  - WarningMenu: "you lose everything you carry if you die" - confirm to set sail.
@@ -24,8 +25,28 @@ public final class ExpeditionMenu {
 
     private static final Item[] DIFF_ICONS = {Items.IRON_SWORD, Items.DIAMOND_SWORD, Items.NETHERITE_SWORD, Items.NETHER_STAR};
 
+    /** 5.12: what the guards wear and get on each difficulty (matches Expedition.gear). */
+    private static final String[] GUARD_GEAR = {
+            "§7Guards: iron/gold helmets and chestplates",
+            "§7Guards: full iron/gold armor, Resistance",
+            "§7Guards: diamond & iron armor, Resistance + Strength",
+            "§7Guards: full diamond, Strength II + Speed"};
+    /** 5.12: what to bring (Wren's advice). */
+    private static final String[] BRING = {
+            "§8Bring diamond armor and golden apples.",
+            "§8Bring enchanted diamond armor and gapples.",
+            "§8Bring your best gear and lots of gapples.",
+            "§8Netherite, totems and a full crew."};
+
     private static String k(long price) {
         return price % 1000 == 0 ? "$" + (price / 1000) + "k" : Economy.format(price);
+    }
+
+    /** "3, 4, 5" for a difficulty's wave sizes. */
+    private static String waves(int d) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < Expedition.WAVES[d].length; i++) b.append(i == 0 ? "" : ", ").append(Expedition.WAVES[d][i]);
+        return b.toString();
     }
 
     /** The button in the /is menu. */
@@ -126,18 +147,22 @@ public final class ExpeditionMenu {
             Islands.Island is = Islands.islandOf(viewer.getUUID());
             Expedition.Pending pd = Expedition.pendingOf(is);
             if (pd == null) return;
-            String[] mobs = {"Normal Nether guards", "Tougher guards (+25% health)", "Strong guards (+60% health, +50% damage)", "Brutal guards (+120% health, double damage)"};
             for (int d = 0; d < 4; d++) {
                 long owe = Expedition.owed(pd, d);
                 int key = ExpeditionLoot.VAULT_KEYS[d][0];
                 List<String> lore = new ArrayList<>();
                 lore.add("§7Price: §6" + Economy.format(Expedition.PRICES[d]) + (owe == 0 ? " §a(paid)" : " §7- you pay §6" + Economy.format(owe) + " §7more"));
                 lore.add("§7" + Expedition.ROOMS[d] + " chest rooms, then the boss arena");
-                lore.add("§7" + mobs[d]);
+                // 5.12: the 5.11 waves, guards and boss (was "Normal Nether guards / +25% health...").
+                lore.add("§7Waves of §f" + waves(d) + " §7guards §8(+1 each per extra crew)");
+                lore.add("§7Next wave every §f" + Expedition.WAVE_SECONDS[d] + "s§7, a §4captain §7leads the last");
+                lore.add(GUARD_GEAR[d]);
+                lore.add("§7Boss: §c" + Math.round(ExpeditionBoss.HP[d]) + "❤ §8(+" + Math.round(ExpeditionBoss.HP_PER_EXTRA_PLAYER * 100) + "% per extra crew)");
                 lore.add("§7Vault: §6" + Economy.format(ExpeditionLoot.vaultMoneyTotal(d)) + " §7(shared) + " + Keys.COLORS[key] + Keys.NAMES[key] + " Key"
                         + (ExpeditionLoot.BONUS_KEY_CHANCE[d] > 0 ? " §7(+" + ExpeditionLoot.BONUS_KEY_CHANCE[d] + "% " + Keys.COLORS[ExpeditionLoot.BONUS_KEY_TIER[d]]
                         + Keys.NAMES[ExpeditionLoot.BONUS_KEY_TIER[d]] + "§7)" : ""));
                 lore.add("§7Better chest loot the harder it is.");
+                lore.add(BRING[d]);
                 lore.add("§eClick to choose");
                 box.setItem(DIFFS[d], Stacks.named(new ItemStack(DIFF_ICONS[d]), Expedition.DIFF_COLORS[d] + "§l" + Expedition.DIFF_NAMES[d], lore.toArray(new String[0])));
             }

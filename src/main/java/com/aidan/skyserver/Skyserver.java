@@ -34,6 +34,7 @@ public class Skyserver implements ModInitializer {
         SkywarsGame.init();
         GoldWarsGame.init();
         com.aidan.skyserver.bedwars.BedwarsGame.init();
+        com.aidan.skyserver.bedwars.BwForge.init();       // 5.12: shared team forges (must come after BedwarsGame)
         LOGGER.info("SkyServer loaded!");
     }
 }

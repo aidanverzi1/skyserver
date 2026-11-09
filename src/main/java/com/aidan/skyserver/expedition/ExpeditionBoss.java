@@ -69,6 +69,10 @@ final class ExpeditionBoss {
     /** Ticks between helpers (by difficulty). */
     static final int[] HELPER_TICKS = {500, 420, 360, 300};
     private static int partCounter = 0;
+    /** 5.12: how many failed part summons were logged (capped so the log stays readable). */
+    private static int summonWarnings = 0;
+    /** 5.12: how often a missing body may be rebuilt in one fight. */
+    static final int MAX_REBUILDS = 4;
 
     /** What the boss needs from the expedition: who's fighting, and calling in help. */
     interface Hooks {
@@ -123,6 +127,8 @@ final class ExpeditionBoss {
         boolean shielded = false, over = false, enraged = false, glowing = false, hurting = false;
         int cdA = 60, cdB = 100, cdC = 160, cdD = 240, helperCd, action = 0, actionTicks = 0, weak = 0, shieldLeft = 0;
         double lift = 0;
+        /** 5.12: times the body was rebuilt after parts went missing. */
+        int rebuilds = 0;
         /** The ring of fire: its radius (-1 = none) and who it already burned. */
         double ring = -1;
         final Set<UUID> ringHit = new HashSet<>();
@@ -221,6 +227,7 @@ final class ExpeditionBoss {
             tickRing(fighters);
             tickEruptions(fighters);
             tickHelpers();
+            if (t % 40 == 0) checkBody();
             if (weak()) freeze();
             else if (colossus) colossusTick(target, fighters);
             else tyrantTick(target, fighters);
@@ -655,6 +662,29 @@ final class ExpeditionBoss {
             }
         }
 
+        /**
+         * 5.12: if body parts are missing (summon refused, chunk reload...), take what's left away and
+         * build the whole body again on the boss. A few tries per fight, each one logged.
+         */
+        private void checkBody() {
+            int missing = 0;
+            for (Display d : parts) if (d.isRemoved()) missing++;
+            if (!parts.isEmpty() && missing == 0) return;
+            if (rebuilds >= MAX_REBUILDS) return;
+            rebuilds++;
+            com.aidan.skyserver.Skyserver.LOGGER.warn("[Expedition] {} body: {} of {} parts missing - rebuilding (try {}/{})",
+                    colossus ? "Cinder Colossus" : "Gilded Tyrant", parts.isEmpty() ? "all" : missing, parts.size(), rebuilds, MAX_REBUILDS);
+            for (Display d : parts) d.discard();
+            for (Display d : orbit) d.discard();
+            parts.clear();
+            orbit.clear();
+            alwaysGlow.clear();
+            for (Display d : level.getEntitiesOfClass(Display.class, body.getBoundingBox().inflate(8), e -> e.entityTags().contains(PART_TAG))) d.discard();
+            glowing = false;
+            if (colossus) buildColossus(this, body.position());
+            else buildTyrant(this, body.position());
+        }
+
         // ---- The body follows the hidden mob ----
 
         private void moveBody() {
@@ -733,6 +763,8 @@ final class ExpeditionBoss {
         Vec3 at = body.position();
         if (fortress) buildColossus(f, at);
         else buildTyrant(f, at);
+        com.aidan.skyserver.Skyserver.LOGGER.info("[Expedition] {} spawned at {} {} {} ({} HP, {} body parts)", fortress ? "Cinder Colossus" : "Gilded Tyrant",
+                Math.round(at.x), Math.round(at.y), Math.round(at.z), Math.round(body.getMaxHealth()), f.parts.size());
         return f;
     }
 
@@ -766,9 +798,12 @@ final class ExpeditionBoss {
             CommandSourceStack src = level.getServer().createCommandSourceStack().withLevel(level).withSuppressedOutput();
             level.getServer().getCommands().performPrefixedCommand(src, cmd);
         } catch (RuntimeException e) {
+            com.aidan.skyserver.Skyserver.LOGGER.warn("[Expedition] boss part summon threw {} for: {}", e.toString(), cmd);
             return null;
         }
         List<Display> found = level.getEntitiesOfClass(Display.class, new AABB(at, at).inflate(2), e -> e.entityTags().contains(tag));
+        // 5.12: say why a boss shows no body (the summon text was refused, or the entity didn't appear).
+        if (found.isEmpty() && summonWarnings++ < 6) com.aidan.skyserver.Skyserver.LOGGER.warn("[Expedition] boss part did not appear: {}", cmd);
         return found.isEmpty() ? null : found.get(0);
     }
 
