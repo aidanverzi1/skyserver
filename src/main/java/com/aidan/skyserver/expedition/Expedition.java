@@ -9,6 +9,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.datafixers.util.Pair;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
@@ -20,6 +21,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -52,8 +54,10 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -82,20 +86,27 @@ import java.util.*;
  *  3. Right-click Wren on the deck: pick the difficulty (the deposit counts toward the price) and
  *     Fortress / Bastion / Surprise, read the warning, set sail. Island members on the deck come along.
  *     Only the player who sets sail pays.
- *  4. 5.9: you land in Wren's Landing, a safe built room next to a real Fortress or Bastion (ExpeditionRooms).
- *     Nothing can hurt you in there and no mobs get in; talk to Captain Wren there to go home.
- *     Around the structure are coloured chest rooms (3/4/5/6 by difficulty). Walk into one and its
- *     guards wake up - they never leave the room, and they can only be hurt by someone inside it.
- *     Beat them and the chest opens. After every room (Easy/Normal) or all but one (Hard/Nightmare)
- *     the Boss Arena opens: walk in to fight the boss, beat it for the Treasure Vault.
- *     The line above your hotbar points to the nearest room you haven't cleared.
+ *  4. 5.10: Wren flies you (~10 seconds while the map is built) to a custom arena map floating over a
+ *     lava sea (ExpeditionRooms): Wren's Landing in the middle (safe, unbreakable, no mobs; talk to
+ *     Wren there to go home), big chest arenas on the platforms around it (3/4/5/6 by difficulty),
+ *     joined by railed bridges and an outer ring path. Walk into an arena and the first wave comes.
+ *     5.11 (much harder): 3 waves on Easy/Normal, 4 on Hard/Nightmare, and they OVERLAP - the next wave
+ *     comes on a timer even if the last one isn't dead. Guards wear armor and carry enchanted weapons,
+ *     archers (skeletons, blazes, crossbow piglins) take the balconies, the last wave brings a captain
+ *     (Wither Knight / Brute Warlord), and every arena has a twist: Blazing, Ambush or Withering.
+ *     No doors lock, but if you leave a fight your health and absorption can't go up until you walk back in.
+ *     Beat every wave and the chest opens. After every arena (Easy/Normal) or all but one (Hard/Nightmare)
+ *     the Boss Arena's gate opens: the Cinder Colossus (Fortress) or Gilded Tyrant (Bastion), custom
+ *     bosses (ExpeditionBoss). Beat it for the Treasure Vault. 1-2 secret alcoves hide behind cracked bricks.
+ *     The line above your hotbar points to the nearest arena you haven't cleared.
  *  5. Break and build freely (except Wren's Landing) - everything you carry comes home. After 30 minutes
  *     Wren pulls everyone up.
  *  6. DYING LOSES EVERYTHING YOU CARRIED (it drops where you died; teammates can grab it until the run
  *     ends). Your ender chest is safe. Totems of Undying work.
  *
  * The expedition world is wiped every server start (fresh terrain, no disk build-up). Nothing about
- * runs is saved: a restart sends everyone home with what they carry.
+ * runs is saved: a restart sends everyone home with what they carry. Nothing spawns there naturally
+ * (IslandSpawnMixin, 5.11).
  */
 public final class Expedition {
     public static final ResourceKey<Level> DIM = ResourceKey.create(Registries.DIMENSION, Identifier.fromNamespaceAndPath(Skyserver.MOD_ID, "expedition"));
@@ -106,10 +117,20 @@ public final class Expedition {
     public static final long[] PRICES = {5_000, 10_000, 20_000, 40_000};
     /** Chest rooms per trip. */
     static final int[] ROOMS = {3, 4, 5, 6};
-    /** Guards per chest room (+2 per extra crew member inside the Nether). */
+    /** 5.11: guards in each wave (every extra crew member in the Nether adds 1 to every wave). */
+    static final int[][] WAVES = {{3, 4, 5}, {4, 5, 6}, {4, 5, 6, 7}, {5, 6, 7, 8}};
+    /** 5.11: seconds until the next wave comes anyway (Ambush arenas: 5 fewer). */
+    static final int[] WAVE_SECONDS = {25, 22, 20, 18};
+    /** Old 5.10 guard counts (no longer used for waves; kept so nothing that reads it breaks). */
     static final int[] GUARDS = {3, 4, 6, 8};
-    /** Extra health / damage for every guard and the boss (0.5 = +50%). */
-    static final double[] HEALTH = {0, 0.25, 0.6, 1.2}, DAMAGE = {0, 0.2, 0.5, 1.0};
+    /** Extra health / damage for every guard and the boss (0.5 = +50%). 5.11: raised. */
+    static final double[] HEALTH = {0.2, 0.4, 0.75, 1.3}, DAMAGE = {0.1, 0.3, 0.6, 1.0};
+    /** 5.11: the last wave's captain gets this much more health on top (2.0 = +200%). */
+    static final double[] CAPTAIN_HEALTH = {2.0, 2.5, 3.0, 3.5};
+    /** 5.11 arena twists. */
+    static final int BLAZING = 0, AMBUSH = 1, WITHERING = 2;
+    static final String[] TWIST_NAMES = {"§6§lBlazing", "§c§lAmbush", "§8§lWithering"};
+    static final String[] TWIST_TIPS = {"§7The floor burns - fire resistance helps", "§7They come through every doorway at once", "§7Every hit withers you"};
     /** Seconds a guard may spend outside its room before it's sent back. */
     static final int LEASH_SECONDS = 3;
     static final int TIME_LIMIT_SECONDS = 30 * 60;
@@ -149,6 +170,10 @@ public final class Expedition {
         boolean bossSpawned = false, bossDead = false, over = false;
         BlockPos vault;
         int warned = 0;
+        /** 5.10: the map is being built (the crew waits on the airship), then they arrive. */
+        boolean building = true;
+        long buildStart;
+        ExpeditionBoss.Fight fight;
     }
 
     private static MinecraftServer server;
@@ -161,6 +186,14 @@ public final class Expedition {
     private static final Map<UUID, Integer> OUTSIDE = new HashMap<>(); // guard -> seconds spent outside its room
     private static final Map<UUID, Long> LAST_HURT = new HashMap<>();
     private static final Map<UUID, Long> LAST_TIP = new HashMap<>();
+    /** 5.10 health lock: player -> {fight they walked out of -> {health, absorption} when they left}. */
+    private static final Map<UUID, Map<ExpeditionRooms.Room, float[]>> HEALTH_LOCK = new HashMap<>();
+    /** The active fights each player was standing in last tick. */
+    private static final Map<UUID, Set<ExpeditionRooms.Room>> IN_FIGHT = new HashMap<>();
+    /** 5.11: each woken arena's twist, when its next wave is due (server tick), and big magma cubes about to split. */
+    private static final Map<ExpeditionRooms.Room, Integer> TWIST = new HashMap<>();
+    private static final Map<ExpeditionRooms.Room, Long> WAVE_DUE = new HashMap<>();
+    private static final Map<ExpeditionRooms.Room, Integer> SPLITTING = new HashMap<>();
     private static int runCounter = 0;
     private static long ticks = 0;
     private static final Random RNG = new Random();
@@ -211,6 +244,7 @@ public final class Expedition {
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> Safe.run("expedition stop", Expedition::shutdown));
         ServerTickEvents.END_SERVER_TICK.register(s -> {
             ticks++;
+            if (!RUNS.isEmpty()) Safe.run("expedition fast tick", Expedition::fastTick);
             if (ticks % 20 == 0) Safe.run("expedition tick", Expedition::tick);
         });
         // Dying in the Nether: everything you carried drops there, you wake up on your island.
@@ -229,7 +263,14 @@ public final class Expedition {
             }
             Object[] g = GUARD_OF.get(entity.getUUID());
             if (g == null) return true;
+            Run gr = (Run) g[0];
+            if (gr.fight != null && gr.fight.body == entity && gr.fight.shielded) {
+                if (source.getEntity() instanceof ServerPlayer sp) tip(sp, "§6The Tyrant's shield is up! §fBreak the 3 gold pillars.");
+                return false;
+            }
             Entity attacker = source.getEntity();
+            // 5.11: guards, minions and the boss never hurt each other (stray fireballs, arrows, eruptions).
+            if (attacker != null && attacker != entity && GUARD_OF.containsKey(attacker.getUUID())) return false;
             if (!(attacker instanceof ServerPlayer ap)) return true; // lava, falling etc. still hurt
             ExpeditionRooms.Room room = (ExpeditionRooms.Room) g[1];
             if (room.inside(ap.getX(), ap.getY(), ap.getZ(), 1.0)) return true;
@@ -237,11 +278,17 @@ public final class Expedition {
             return false;
         });
         ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, base, taken, blocked) -> {
-            if (entity instanceof ServerPlayer p && isExpedition(p.level()) && taken > 0) LAST_HURT.put(p.getUUID(), ticks);
+            if (!isExpedition(entity.level())) return;
+            Safe.run("expedition after damage", () -> afterDamage(entity, source.getEntity(), taken));
         });
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (!isExpedition(entity.level())) return;
             Safe.run("expedition mob death", () -> mobDied(entity, source.getEntity()));
+        });
+        // 5.11: the little magma cubes a guard splits into become guards of the same arena.
+        ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
+            if (!isExpedition(world) || entity.getType() != net.minecraft.world.entity.EntityTypes.MAGMA_CUBE || GUARD_OF.containsKey(entity.getUUID())) return;
+            if (entity instanceof Mob m) Safe.run("expedition split", () -> adoptSplit(m));
         });
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
             if (!isExpedition(level) || level.isClientSide() || !(player instanceof ServerPlayer sp)) return InteractionResult.PASS;
@@ -258,8 +305,13 @@ public final class Expedition {
             if (!isExpedition(level)) return true;
             Run run = PLAYER_RUN.get(player.getUUID());
             if (run == null || run.layout == null) return true;
+            if (run.fight != null && run.fight.isPillar(pos)) {
+                run.fight.breakPillar(pos);
+                return false;
+            }
             if (run.layout.locked.contains(pos.asLong())) {
-                tip((ServerPlayer) player, "§7Wren's Landing is built to last - its walls can't be broken.");
+                tip((ServerPlayer) player, run.layout.spawn.inside(pos.getX(), pos.getY(), pos.getZ(), 2)
+                        ? "§7Wren's Landing is built to last - it can't be broken." : "§7The Boss Arena's walls are enchanted - they can't be broken.");
                 return false;
             }
             for (ExpeditionRooms.Room r : run.layout.rooms) {
@@ -514,87 +566,90 @@ public final class Expedition {
         ServerLevel nl = level();
         if (nl == null) return null;
         int n = runCounter++;
-        BlockPos origin = new BlockPos(4_000 + (n % 20) * 4_000, 64, 4_000 + (n / 20) * 4_000);
-        Holder<Structure> structure = nl.registryAccess().lookupOrThrow(Registries.STRUCTURE)
-                .getOrThrow(fortress ? BuiltinStructures.FORTRESS : BuiltinStructures.BASTION_REMNANT);
-        Pair<BlockPos, Holder<Structure>> found = nl.getChunkSource().getGenerator()
-                .findNearestMapStructure(nl, HolderSet.direct(structure), origin, 48, false);
-        if (found == null) return null;
-        BlockPos at = found.getFirst();
-        ChunkAccess chunk = nl.getChunk(at.getX() >> 4, at.getZ() >> 4);
-        StructureStart start = nl.structureManager().getStartForStructure(structure.value(), chunk);
-        if (start == null || !start.isValid()) return null;
-        BoundingBox box = start.getBoundingBox();
-        int mx = (box.minX() + box.maxX()) / 2, mz = (box.minZ() + box.maxZ()) / 2;
-        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) nl.getChunk((mx >> 4) + dx, (mz >> 4) + dz);
-        BlockPos landing = findLanding(nl, box, mx, mz);
+        // 5.10: every trip gets its own spot in the flat lava-sea world, far from the others.
+        int spacing = ExpeditionRooms.HALF * 2 + 200;
+        BlockPos center = new BlockPos(3_000 + (n % 20) * spacing, ExpeditionRooms.FLOOR_Y, 3_000 + (n / 20) * spacing);
         Run run = new Run();
         run.islandId = is.id;
         run.diff = diff;
         run.fortress = fortress;
         run.leader = leader.getUUID();
-        run.startTick = ticks;
-        run.landing = landing;
-        run.cx = landing.getX() + 0.5;
-        run.cz = landing.getZ() + 0.5;
-        run.half = ExpeditionRooms.R + 10;
-        // 5.9: build Wren's Landing, the chest rooms and the boss arena into the terrain.
-        run.layout = ExpeditionRooms.build(nl, landing, mx, mz, fortress, ROOMS[diff], RNG);
+        run.layout = ExpeditionRooms.plan(nl, center, fortress, ROOMS[diff], RNG);
+        run.landing = run.layout.landing;
+        run.cx = center.getX() + 0.5;
+        run.cz = center.getZ() + 0.5;
+        run.half = ExpeditionRooms.HALF;
         int rooms = run.layout.rooms.size();
         run.unlockAt = diff <= 1 ? rooms : Math.max(1, rooms - 1);
         if (rooms == 0) run.unlockAt = 0;
-        run.wren = spawnNetherWren(nl, run.layout.wren);
-        RUNS.put(is.id, run);
-        Skyserver.LOGGER.info("Nether Expedition #{} ({} {}): {} chest rooms, arena at {}, {} vanilla chests removed", n, DIFF_NAMES[diff],
-                fortress ? "Fortress" : "Bastion", rooms, run.layout.arena.floorCenter().toShortString(), run.layout.vanillaChestsRemoved);
-        String where = fortress ? "a §4Nether Fortress" : "a §6Bastion Remnant";
+        run.building = true;
+        run.buildStart = ticks;
+        run.startTick = ticks;
         for (ServerPlayer m : crew) {
             run.crew.add(m.getUUID());
-            run.inside.add(m.getUUID());
             PLAYER_RUN.put(m.getUUID(), run);
+        }
+        RUNS.put(is.id, run);
+        Skyserver.LOGGER.info("Nether Expedition #{} ({} {}): {} chest arenas, {} blocks to build", n, DIFF_NAMES[diff],
+                fortress ? "Fortress" : "Bastion", rooms, run.layout.builder.order.length);
+        for (ServerPlayer m : crew) {
             m.closeContainer();
-            m.teleportTo(nl, landing.getX() + 0.5, landing.getY(), landing.getZ() + 0.5, Set.of(), m.getYRot(), 0f, true);
-            m.resetFallDistance();
-            sendBorder(m, run);
-            Announce.title(m, DIFF_COLORS[diff] + "§l" + DIFF_NAMES[diff].toUpperCase() + " EXPEDITION", "§7" + where.replace("§4", "").replace("§6", ""), 10, 60, 20);
-            Lobby.msg(m, "§6§lNETHER EXPEDITION: §f" + DIFF_COLORS[diff] + DIFF_NAMES[diff] + " §7- " + where + "§7!");
-            Lobby.msg(m, "§7You're in §6Wren's Landing §7- safe from everything. §f" + rooms + " chest rooms §7wait around the structure"
-                    + " (the line above your hotbar points the way). Walk in to wake the guards, beat them to open the chest.");
-            Lobby.msg(m, "§7Clear §f" + run.unlockAt + " §7room" + (run.unlockAt == 1 ? "" : "s") + " to open the §cBoss Arena§7. "
-                    + "§c§lIf you die, you lose everything you're carrying. §7Talk to §6Captain Wren §7here to go home. (" + (TIME_LIMIT_SECONDS / 60) + " minutes)");
+            Lobby.msg(m, "§6[Captain Wren] §fWe're off! Hold onto your hats - it's a short flight to the " + (fortress ? "§4Fortress" : "§6Bastion") + "§f...");
         }
         PlayerStats.add(leader, "expedition", 1);
         return run;
     }
 
-    /** A safe spot near the structure's middle: solid floor, two air above, no lava next to it. */
-    private static BlockPos findLanding(ServerLevel nl, BoundingBox box, int mx, int mz) {
-        BlockPos best = null;
-        double bestD = Double.MAX_VALUE;
-        int top = Math.min(box.maxY() + 2, 112), bottom = Math.max(box.minY(), 36);
-        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-        for (int x = mx - 20; x <= mx + 20; x += 2)
-            for (int z = mz - 20; z <= mz + 20; z += 2)
-                for (int y = top; y >= bottom; y--) {
-                    BlockState floor = nl.getBlockState(m.set(x, y - 1, z));
-                    if (!floor.isFaceSturdy(nl, m, net.minecraft.core.Direction.UP) || floor.is(Blocks.MAGMA_BLOCK)) continue;
-                    if (!nl.getBlockState(m.set(x, y, z)).isAir() || !nl.getBlockState(m.set(x, y + 1, z)).isAir()) continue;
-                    boolean lava = false;
-                    for (int dx = -1; dx <= 1 && !lava; dx++)
-                        for (int dz = -1; dz <= 1 && !lava; dz++)
-                            for (int dy = -1; dy <= 1 && !lava; dy++)
-                                if (!nl.getFluidState(m.set(x + dx, y + dy, z + dz)).isEmpty()) lava = true;
-                    if (lava) continue;
-                    double d = Math.hypot(x - mx, z - mz) + Math.abs(y - (box.minY() + box.maxY()) / 2.0) * 0.3;
-                    if (d < bestD) {
-                        bestD = d;
-                        best = new BlockPos(x, y, z);
-                    }
-                    break;
-                }
-        if (best != null) return best;
-        // Nothing safe: the spawn room is carved out at the top of the structure anyway.
-        return new BlockPos(mx, Math.min(110, box.maxY() + 2), mz);
+    /** The map is built: the crew lands in Wren's Landing. */
+    private static void arrive(Run run) {
+        ServerLevel nl = level();
+        run.building = false;
+        run.startTick = ticks; // the clock starts on landing
+        if (nl == null) {
+            endRun(run, "the Nether world is missing");
+            return;
+        }
+        run.wren = spawnNetherWren(nl, run.layout.wren);
+        // The secret alcoves' little chests.
+        for (ExpeditionRooms.Secret sec : run.layout.secrets) {
+            if (!(nl.getBlockEntity(sec.chest) instanceof Container c)) continue;
+            List<ItemStack> items = secretLoot(run);
+            for (int i = 0; i < items.size() && i < c.getContainerSize(); i++) c.setItem(RNG.nextInt(c.getContainerSize()), items.get(i));
+            c.setChanged();
+        }
+        int rooms = run.layout.rooms.size();
+        String where = run.fortress ? "a §4Nether Fortress" : "a §6Bastion";
+        BlockPos landing = run.landing;
+        int waves = WAVES[run.diff].length;
+        for (UUID id : run.crew) {
+            ServerPlayer m = server.getPlayerList().getPlayer(id);
+            if (m == null || PLAYER_RUN.get(id) != run) continue;
+            run.inside.add(id);
+            m.closeContainer();
+            m.teleportTo(nl, landing.getX() + 0.5, landing.getY(), landing.getZ() + 0.5, Set.of(), 180f, 0f, true);
+            m.resetFallDistance();
+            sendBorder(m, run);
+            Announce.title(m, DIFF_COLORS[run.diff] + "§l" + DIFF_NAMES[run.diff].toUpperCase() + " EXPEDITION", "§7" + where.replace("§4", "").replace("§6", ""), 10, 60, 20);
+            Lobby.msg(m, "§6§lNETHER EXPEDITION: §f" + DIFF_COLORS[run.diff] + DIFF_NAMES[run.diff] + " §7- " + where + "§7!");
+            Lobby.msg(m, "§7You're in §6Wren's Landing §7- safe from everything. §f" + rooms + " chest arenas §7wait on the platforms around you"
+                    + " (the line above your hotbar points the way). Walk in to start the fight: §f" + waves + " waves§7, and the next one §ccomes on a timer§7"
+                    + " even if the last isn't dead. A captain leads the last wave.");
+            Lobby.msg(m, "§7Clear §f" + run.unlockAt + " §7arena" + (run.unlockAt == 1 ? "" : "s") + " to open the §cBoss Arena§7's gate. "
+                    + "§eLeaving a fight locks your health until you go back in. §c§lIf you die, you lose everything you're carrying. §7Talk to §6Captain Wren §7here to go home. ("
+                    + (TIME_LIMIT_SECONDS / 60) + " minutes)");
+        }
+        if (run.inside.isEmpty()) endRun(run, "nobody came");
+    }
+
+    /** A small bonus in a secret alcove. */
+    private static List<ItemStack> secretLoot(Run run) {
+        List<ItemStack> out = new ArrayList<>();
+        out.add(new ItemStack(Items.GOLDEN_CARROT, 4 + RNG.nextInt(5)));
+        out.add(new ItemStack(Items.ARROW, 8 + RNG.nextInt(9)));
+        out.add(net.minecraft.world.item.alchemy.PotionContents.createItemStack(Items.POTION, net.minecraft.world.item.alchemy.Potions.FIRE_RESISTANCE));
+        out.add(new ItemStack(run.fortress ? Items.BLAZE_ROD : Items.GOLD_INGOT, 2 + RNG.nextInt(3 + run.diff)));
+        if (run.diff >= 2) out.add(new ItemStack(Items.GOLDEN_APPLE, 1));
+        return out;
     }
 
     private static UUID spawnNetherWren(ServerLevel nl, double[] at) {
@@ -640,13 +695,20 @@ public final class Expedition {
 
     static void howItWorks(ServerPlayer p) {
         Run run = PLAYER_RUN.get(p.getUUID());
+        int waves = WAVES[run != null ? run.diff : 0].length;
         Lobby.msg(p, "§6[Captain Wren] §fHere's the lay of the land:");
-        Lobby.msg(p, " §7- This room is §6Wren's Landing§7: nothing can hurt you in here and no beast gets in.");
-        Lobby.msg(p, " §7- Look for rooms with a §ccoloured stripe §7over the door. Walk in and the guards wake. They won't follow you out -"
-                + " and you can only hurt them from inside the room.");
-        Lobby.msg(p, " §7- Beat every guard and the chest at the back opens. The stripe turns §agreen §7when a room is done.");
-        Lobby.msg(p, " §7- Clear " + (run == null ? "enough" : String.valueOf(run.unlockAt)) + " rooms and the §cBoss Arena §7opens. Beat the boss for the §6Treasure Vault§7.");
-        Lobby.msg(p, " §7- The line above your hotbar points to the next room. Mine and build all you like - what you carry comes home.");
+        Lobby.msg(p, " §7- This pavilion is §6Wren's Landing§7: nothing can hurt you in here and no beast gets in.");
+        Lobby.msg(p, " §7- The platforms around it hold §cchest arenas §7(coloured stripes over the doorways). Walk in and the first wave comes;"
+                + " " + waves + " waves in all, and §cthe next one won't wait §7for you to finish the last. Archers take the balconies,"
+                + " and a §4captain §7leads the last wave. Guards stay in their arena, and you can only hurt them from inside.");
+        Lobby.msg(p, " §7- Every arena has a twist: " + TWIST_NAMES[BLAZING] + " §7(burning floor - fire resistance helps), "
+                + TWIST_NAMES[AMBUSH] + " §7(they pour in through every doorway), " + TWIST_NAMES[WITHERING] + " §7(their hits wither you).");
+        Lobby.msg(p, " §7- Doors never lock - but if you walk out of a fight, your §chealth can't go up §7until you walk back in.");
+        Lobby.msg(p, " §7- Beat every wave and the chest opens. The stripes turn §agreen §7when an arena is done.");
+        Lobby.msg(p, " §7- Clear " + (run == null ? "enough" : String.valueOf(run.unlockAt)) + " arenas and the §cBoss Arena§7's gate opens. Beat the boss for the §6Treasure Vault§7."
+                + " Watch the floor, and hit it hard when it's stunned.");
+        Lobby.msg(p, " §7- Bridges have rails, but break a rail or the floor and it's a long drop into lava. §dCracked bricks at floor level hide secrets.");
+        Lobby.msg(p, " §7- The line above your hotbar points to the next arena. Mine and build all you like - what you carry comes home.");
         Lobby.msg(p, " §c- If you die, you drop everything you carry. §7Talk to me in here to go home safe.");
     }
 
@@ -685,6 +747,10 @@ public final class Expedition {
         return r.guards.size();
     }
 
+    private static int twist(ExpeditionRooms.Room r) {
+        return TWIST.getOrDefault(r, -1);
+    }
+
     private static EntityType<? extends Mob> guardType(Run run, int i) {
         List<EntityType<? extends Mob>> fort = List.of(net.minecraft.world.entity.EntityTypes.WITHER_SKELETON, net.minecraft.world.entity.EntityTypes.BLAZE,
                 net.minecraft.world.entity.EntityTypes.WITHER_SKELETON, net.minecraft.world.entity.EntityTypes.SKELETON, net.minecraft.world.entity.EntityTypes.MAGMA_CUBE);
@@ -695,23 +761,47 @@ public final class Expedition {
         return list.get(i % list.size());
     }
 
+    /** 5.11: archers (skeletons, blazes, and every other piglin - those get crossbows) take the high spots. */
+    private static boolean isRanged(EntityType<?> type, int i) {
+        return type == net.minecraft.world.entity.EntityTypes.SKELETON || type == net.minecraft.world.entity.EntityTypes.BLAZE
+                || (type == net.minecraft.world.entity.EntityTypes.PIGLIN && i % 2 == 0);
+    }
+
+    private static boolean standable(ServerLevel level, BlockPos.MutableBlockPos m, int x, int y, int z) {
+        if (!level.getBlockState(m.set(x, y, z)).isAir() || !level.getBlockState(m.set(x, y + 1, z)).isAir()) return false;
+        return level.getBlockState(m.set(x, y - 1, z)).isFaceSturdy(level, m, net.minecraft.core.Direction.UP);
+    }
+
     /** A random free floor spot inside a room. */
     private static BlockPos roomSpot(ServerLevel level, ExpeditionRooms.Room r) {
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
         for (int tries = 0; tries < 30; tries++) {
             int x = r.x0 + RNG.nextInt(r.x1 - r.x0 + 1), z = r.z0 + RNG.nextInt(r.z1 - r.z0 + 1);
             for (int y = r.y0; y <= r.y1 - 1; y++) {
-                if (!level.getBlockState(m.set(x, y, z)).isAir() || !level.getBlockState(m.set(x, y + 1, z)).isAir()) continue;
-                if (!level.getBlockState(m.set(x, y - 1, z)).isFaceSturdy(level, m, net.minecraft.core.Direction.UP)) continue;
-                return new BlockPos(x, y, z);
+                if (standable(level, m, x, y, z)) return new BlockPos(x, y, z);
             }
         }
         return r.floorCenter();
     }
 
+    /** 5.11: a spot up high (balconies, walkways, broken pillar tops), or a floor spot if there's none. */
+    private static BlockPos highSpot(ServerLevel level, ExpeditionRooms.Room r) {
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int tries = 0; tries < 40; tries++) {
+            int x = r.x0 + RNG.nextInt(r.x1 - r.x0 + 1), z = r.z0 + RNG.nextInt(r.z1 - r.z0 + 1);
+            for (int y = r.y1 - 2; y >= r.y0 + 4; y--) {
+                if (standable(level, m, x, y, z)) return new BlockPos(x, y, z);
+            }
+        }
+        return roomSpot(level, r);
+    }
+
     /** Spawns one guard (or the boss) inside a room, made stronger for the difficulty. */
     private static Mob spawnGuard(ServerLevel level, Run run, ExpeditionRooms.Room room, EntityType<? extends Mob> type, boolean boss) {
-        BlockPos spot = roomSpot(level, room);
+        return spawnGuard(level, run, room, type, boss, roomSpot(level, room));
+    }
+
+    private static Mob spawnGuard(ServerLevel level, Run run, ExpeditionRooms.Room room, EntityType<? extends Mob> type, boolean boss, BlockPos spot) {
         Mob m = type.create(level, EntitySpawnReason.EVENT);
         if (m == null) return null;
         m.snapTo(spot.getX() + 0.5, spot.getY(), spot.getZ() + 0.5, RNG.nextFloat() * 360f, 0f);
@@ -724,9 +814,10 @@ public final class Expedition {
         m.addTag(GUARD_TAG);
         ServerPlayer target = nearestIn(run, room);
         if (target != null) m.setTarget(target);
-        level.addFreshEntity(m);
+        // Recorded before it joins the world, so the split-adoption hook never mistakes it for a stray.
         GUARD_OF.put(m.getUUID(), new Object[]{run, room});
         room.guards.add(m.getUUID());
+        level.addFreshEntity(m);
         return m;
     }
 
@@ -735,21 +826,205 @@ public final class Expedition {
         a.addPermanentModifier(new AttributeModifier(Identifier.fromNamespaceAndPath(Skyserver.MOD_ID, id), amount, AttributeModifier.Operation.ADD_MULTIPLIED_BASE));
     }
 
+    // ---- 5.11: gear for guards ----
+
+    private static final EquipmentSlot[] ARMOR_SLOTS = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
+    private static final Item[] GOLD_ARMOR = {Items.GOLDEN_HELMET, Items.GOLDEN_CHESTPLATE, Items.GOLDEN_LEGGINGS, Items.GOLDEN_BOOTS};
+    private static final Item[] IRON_ARMOR = {Items.IRON_HELMET, Items.IRON_CHESTPLATE, Items.IRON_LEGGINGS, Items.IRON_BOOTS};
+    private static final Item[] DIAMOND_ARMOR = {Items.DIAMOND_HELMET, Items.DIAMOND_CHESTPLATE, Items.DIAMOND_LEGGINGS, Items.DIAMOND_BOOTS};
+
+    /** Armor piece i (helmet, chest, legs, boots) for this guard, or null. Easy: helmet + chest only. */
+    private static Item armorPiece(boolean piglin, int d, int i) {
+        if (d == 0 && i >= 2) return null;
+        if (piglin) return d <= 1 ? GOLD_ARMOR[i] : d == 2 ? IRON_ARMOR[i] : DIAMOND_ARMOR[i];
+        if (d <= 1) return IRON_ARMOR[i];
+        if (d == 2) return i <= 1 ? DIAMOND_ARMOR[i] : IRON_ARMOR[i];
+        return DIAMOND_ARMOR[i];
+    }
+
+    /** Puts an item on a guard; guards never drop their gear. */
+    private static void equip(Mob m, EquipmentSlot slot, ItemStack s) {
+        m.setItemSlot(slot, s);
+        m.setDropChance(slot, 0f);
+    }
+
+    private static ItemStack enchanted(ServerLevel level, Item item, Object... keysAndLevels) {
+        ItemStack s = new ItemStack(item);
+        for (int i = 0; i + 1 < keysAndLevels.length; i += 2) {
+            @SuppressWarnings("unchecked")
+            ResourceKey<net.minecraft.world.item.enchantment.Enchantment> k = (ResourceKey<net.minecraft.world.item.enchantment.Enchantment>) keysAndLevels[i];
+            int lvl = (Integer) keysAndLevels[i + 1];
+            if (lvl > 0) ExpeditionLoot.enchant(level, s, k, lvl);
+        }
+        return s;
+    }
+
+    /** Armor, an enchanted weapon and potion effects, all by difficulty. ranged = piglins get a crossbow. */
+    private static void gear(ServerLevel level, Run run, Mob m, boolean ranged) {
+        int d = run.diff;
+        EntityType<?> t = m.getType();
+        boolean piglin = t == net.minecraft.world.entity.EntityTypes.PIGLIN || t == net.minecraft.world.entity.EntityTypes.PIGLIN_BRUTE;
+        boolean skel = t == net.minecraft.world.entity.EntityTypes.WITHER_SKELETON || t == net.minecraft.world.entity.EntityTypes.SKELETON;
+        if (piglin || skel) {
+            int prot = new int[]{0, piglin ? 1 : 0, 1, 2}[d];
+            for (int i = 0; i < 4; i++) {
+                Item a = armorPiece(piglin, d, i);
+                equip(m, ARMOR_SLOTS[i], a == null ? ItemStack.EMPTY : enchanted(level, a, Enchantments.PROTECTION, prot));
+            }
+            ItemStack hand;
+            if (t == net.minecraft.world.entity.EntityTypes.WITHER_SKELETON)
+                hand = enchanted(level, d <= 1 ? Items.IRON_SWORD : Items.DIAMOND_SWORD, Enchantments.SHARPNESS, new int[]{0, 1, 1, 3}[d]);
+            else if (t == net.minecraft.world.entity.EntityTypes.SKELETON)
+                hand = enchanted(level, Items.BOW, Enchantments.POWER, d + 1, Enchantments.FLAME, d == 3 ? 1 : 0);
+            else if (t == net.minecraft.world.entity.EntityTypes.PIGLIN)
+                hand = ranged ? enchanted(level, Items.CROSSBOW, Enchantments.QUICK_CHARGE, new int[]{1, 1, 2, 3}[d], Enchantments.PIERCING, new int[]{0, 0, 1, 2}[d])
+                        : enchanted(level, Items.GOLDEN_SWORD, Enchantments.SHARPNESS, new int[]{0, 1, 2, 3}[d]);
+            else
+                hand = enchanted(level, new Item[]{Items.GOLDEN_AXE, Items.GOLDEN_AXE, Items.IRON_AXE, Items.DIAMOND_AXE}[d], Enchantments.SHARPNESS, new int[]{0, 1, 1, 2}[d]);
+            equip(m, EquipmentSlot.MAINHAND, hand);
+        }
+        int dur = 20 * 60 * 60;
+        if (d >= 1) m.addEffect(new MobEffectInstance(MobEffects.RESISTANCE, dur, 0, false, false));
+        if (d == 2) m.addEffect(new MobEffectInstance(MobEffects.STRENGTH, dur, 0, false, false));
+        if (d == 3) {
+            m.addEffect(new MobEffectInstance(MobEffects.STRENGTH, dur, 1, false, false));
+            m.addEffect(new MobEffectInstance(MobEffects.SPEED, dur, 0, false, false));
+        }
+    }
+
+    /** Spawns a guard with its gear: archers up high, the rest at `floor`. */
+    private static Mob spawnFighter(ServerLevel level, Run run, ExpeditionRooms.Room r, EntityType<? extends Mob> type, boolean ranged, BlockPos floor) {
+        BlockPos spot = ranged ? highSpot(level, r) : floor;
+        Mob m = spawnGuard(level, run, r, type, false, spot);
+        if (m != null) gear(level, run, m, ranged);
+        return m;
+    }
+
+    /** 5.11: the last wave's captain - a Wither Knight (Fortress) or Brute Warlord (Bastion). */
+    private static void captain(ServerLevel level, Run run, ExpeditionRooms.Room r) {
+        int d = run.diff;
+        EntityType<? extends Mob> type = run.fortress ? net.minecraft.world.entity.EntityTypes.WITHER_SKELETON : net.minecraft.world.entity.EntityTypes.PIGLIN_BRUTE;
+        BlockPos spot = r.doorsIn.isEmpty() ? roomSpot(level, r) : r.doorsIn.get(RNG.nextInt(r.doorsIn.size()));
+        Mob m = spawnGuard(level, run, r, type, false, spot);
+        if (m == null) return;
+        gear(level, run, m, false);
+        Item weapon = run.fortress ? (d >= 2 ? Items.NETHERITE_SWORD : Items.DIAMOND_SWORD) : (d >= 2 ? Items.NETHERITE_AXE : Items.DIAMOND_AXE);
+        equip(m, EquipmentSlot.MAINHAND, enchanted(level, weapon, Enchantments.SHARPNESS, d + 1));
+        boost(m.getAttribute(Attributes.MAX_HEALTH), "exp_captain", CAPTAIN_HEALTH[d]);
+        m.setHealth(m.getMaxHealth());
+        AttributeInstance scale = m.getAttribute(Attributes.SCALE);
+        if (scale != null) scale.setBaseValue(1.3);
+        AttributeInstance kbRes = m.getAttribute(Attributes.KNOCKBACK_RESISTANCE);
+        if (kbRes != null) kbRes.setBaseValue(0.7);
+        AttributeInstance kb = m.getAttribute(Attributes.ATTACK_KNOCKBACK);
+        if (kb != null) kb.setBaseValue(1.5);
+        m.addEffect(new MobEffectInstance(MobEffects.STRENGTH, 20 * 60 * 60, d >= 1 ? 1 : 0, false, false));
+        String nm = run.fortress ? "§4§lWither Knight" : "§6§lBrute Warlord";
+        m.setCustomName(Component.literal(nm));
+        m.setCustomNameVisible(true);
+        m.setGlowingTag(true);
+        level.playSound(null, m.blockPosition(), SoundEvents.ENDER_DRAGON_GROWL, SoundSource.HOSTILE, 1.2f, 1.4f);
+        for (ServerPlayer p : inside(run))
+            if (r.inside(p.getX(), p.getY(), p.getZ(), 1)) Announce.title(p, nm, "§7leads the last wave!", 5, 40, 10);
+    }
+
     /** Someone walked into a chest room for the first time: its guards wake. */
     private static void wakeRoom(ServerLevel level, Run run, ExpeditionRooms.Room r) {
         r.woke = true;
-        int count = GUARDS[run.diff] + 2 * Math.max(0, run.inside.size() - 1);
-        for (int i = 0; i < count; i++) spawnGuard(level, run, r, guardType(run, i), false);
-        level.playSound(null, r.floorCenter(), SoundEvents.WITHER_SKELETON_AMBIENT, SoundSource.HOSTILE, 1.5f, 0.7f);
+        // 5.11: fixed wave sizes by difficulty, +1 per wave for every extra crew member.
+        int extra = Math.max(0, run.inside.size() - 1);
+        int[] base = WAVES[run.diff];
+        r.waves = base.length;
+        r.waveSizes = new int[r.waves];
+        for (int w = 0; w < r.waves; w++) r.waveSizes[w] = base[w] + extra;
+        r.wave = 0;
+        int tw = RNG.nextInt(3);
+        TWIST.put(r, tw);
         for (ServerPlayer m : inside(run))
-            if (r.inside(m.getX(), m.getY(), m.getZ(), 1)) Announce.title(m, "§c§lGUARDS!", "§7Beat all §f" + r.guards.size() + " §7to open the chest", 5, 40, 10);
-        if (r.guards.isEmpty()) clearRoom(level, run, r); // nothing could spawn: don't lock it forever
+            if (r.inside(m.getX(), m.getY(), m.getZ(), 1)) Lobby.msg(m, TWIST_NAMES[tw] + " arena! " + TWIST_TIPS[tw] + "§7.");
+        nextWave(level, run, r);
+    }
+
+    /**
+     * Sends the next wave into a room. 5.11: archers spawn up high; the first wave appears around the
+     * room (Ambush: at every doorway), later ones come through the doorways. The wave after this one
+     * is due in WAVE_SECONDS whether this one is dead or not.
+     */
+    private static void nextWave(ServerLevel level, Run run, ExpeditionRooms.Room r) {
+        r.waveComing = false;
+        if (run.over || r.cleared || r.wave >= r.waves) return;
+        int w = r.wave++;
+        boolean last = r.wave >= r.waves;
+        int tw = twist(r);
+        int count = r.waveSizes[w];
+        int offset = RNG.nextInt(8);
+        boolean fromDoors = (w > 0 || tw == AMBUSH) && !r.doorsIn.isEmpty();
+        for (int i = 0; i < count; i++) {
+            EntityType<? extends Mob> type = guardType(run, i + offset + w * 2);
+            BlockPos floor;
+            if (!fromDoors) floor = roomSpot(level, r);
+            else {
+                BlockPos door = r.doorsIn.get((i + w) % r.doorsIn.size());
+                floor = door.offset(RNG.nextInt(3) - 1, 0, RNG.nextInt(3) - 1);
+            }
+            spawnFighter(level, run, r, type, isRanged(type, i), floor);
+        }
+        // Blazing arenas: one more fire mob every wave.
+        if (tw == BLAZING) {
+            if (run.fortress) spawnFighter(level, run, r, net.minecraft.world.entity.EntityTypes.BLAZE, true, roomSpot(level, r));
+            else spawnFighter(level, run, r, net.minecraft.world.entity.EntityTypes.MAGMA_CUBE, false, roomSpot(level, r));
+        }
+        if (last) captain(level, run, r);
+        else WAVE_DUE.put(r, ticks + (WAVE_SECONDS[run.diff] - (tw == AMBUSH ? 5 : 0)) * 20L);
+        level.playSound(null, r.floorCenter(), w == 0 ? SoundEvents.WITHER_SKELETON_AMBIENT : SoundEvents.RAVAGER_ROAR, SoundSource.HOSTILE, 1.5f, 0.7f);
+        String sub = w == 0 ? (tw >= 0 ? TWIST_NAMES[tw] + " §7- beat every wave to open the chest" : "§7Beat every wave to open the chest")
+                : last ? "§4The captain is here!" : "§7They're coming through the doorways!";
+        for (ServerPlayer m : inside(run))
+            if (r.inside(m.getX(), m.getY(), m.getZ(), 1))
+                Announce.title(m, "§c§lWAVE " + (w + 1) + "/" + r.waves, sub, 5, 40, 10);
+        if (r.guards.isEmpty()) checkRoom(level, run, r); // nothing could spawn: don't lock it forever
+    }
+
+    /** After a guard dies (or nothing spawned): next wave early, or the room is cleared. */
+    private static void checkRoom(ServerLevel level, Run run, ExpeditionRooms.Room room) {
+        if (run.over || room.cleared) return;
+        int left = guardsLeft(level, room);
+        if (left > 0 || SPLITTING.getOrDefault(room, 0) > 0) {
+            if (left > 0)
+                for (ServerPlayer m : inside(run)) if (room.inside(m.getX(), m.getY(), m.getZ(), 1)) Announce.actionBar(m, "§cWave " + room.wave + "/" + room.waves + " §7- guards left: §f" + left);
+            return;
+        }
+        if (room.wave < room.waves) {
+            if (!room.waveComing) {
+                room.waveComing = true;
+                for (ServerPlayer m : inside(run)) if (room.inside(m.getX(), m.getY(), m.getZ(), 1)) Announce.actionBar(m, "§aWave cleared! §eThe next wave is coming...");
+                Lobby.runLaterTicks(60, () -> Safe.run("expedition wave", () -> nextWave(level, run, room)));
+            }
+        } else clearRoom(level, run, room);
+    }
+
+    /** 5.11: a little magma cube split from a guard joins that guard's arena. */
+    private static void adoptSplit(Mob m) {
+        for (Run run : RUNS.values()) {
+            if (run.over || run.layout == null) continue;
+            for (ExpeditionRooms.Room r : run.layout.rooms) {
+                if (!r.active() || !r.inside(m.getX(), m.getY(), m.getZ(), 1.5)) continue;
+                m.addTag(GUARD_TAG);
+                m.setPersistenceRequired();
+                GUARD_OF.put(m.getUUID(), new Object[]{run, r});
+                r.guards.add(m.getUUID());
+                ServerPlayer target = nearestIn(run, r);
+                if (target != null) m.setTarget(target);
+                return;
+            }
+        }
     }
 
     private static void clearRoom(ServerLevel level, Run run, ExpeditionRooms.Room r) {
         if (r.cleared) return;
         r.cleared = true;
         run.cleared++;
+        WAVE_DUE.remove(r);
         if (r.chest != null && level.getBlockEntity(r.chest) instanceof Container c) {
             List<ItemStack> loot = ExpeditionLoot.chestLoot(level, run.diff, run.fortress, RNG, run.roomScrap);
             List<Integer> slots = new ArrayList<>();
@@ -771,10 +1046,13 @@ public final class Expedition {
     private static void openArena(Run run) {
         run.arenaOpen = true;
         ServerLevel level = level();
-        if (level != null) level.playSound(null, run.layout.arena.floorCenter(), SoundEvents.WITHER_SPAWN, SoundSource.HOSTILE, 2f, 0.6f);
+        if (level != null) {
+            ExpeditionRooms.openGate(level, run.layout);
+            level.playSound(null, run.layout.arena.floorCenter(), SoundEvents.WITHER_SPAWN, SoundSource.HOSTILE, 2f, 0.6f);
+        }
         for (ServerPlayer m : inside(run)) {
-            Announce.title(m, "§c§lTHE ARENA IS OPEN", "§7Follow the arrow - the boss is waiting", 5, 60, 15);
-            Lobby.msg(m, "§c§lThe Boss Arena is open! §7Walk in to face the " + (run.fortress ? "§6Blaze Warden" : "§cPiglin Warlord") + "§7.");
+            Announce.title(m, "§c§lTHE GATE IS OPEN", "§7Follow the arrow - the boss is waiting", 5, 60, 15);
+            Lobby.msg(m, "§c§lThe Boss Arena's gate is open! §7Walk in to face the " + ExpeditionBoss.name(run.fortress) + "§7.");
         }
     }
 
@@ -782,21 +1060,69 @@ public final class Expedition {
         if (run.bossSpawned || run.over) return;
         run.bossSpawned = true;
         ExpeditionRooms.Room arena = run.layout.arena;
-        EntityType<? extends Mob> type = run.fortress ? net.minecraft.world.entity.EntityTypes.BLAZE : net.minecraft.world.entity.EntityTypes.PIGLIN_BRUTE;
-        Mob boss = spawnGuard(level, run, arena, type, true);
-        if (boss == null) return;
-        boss.setCustomName(Component.literal(run.fortress ? "§6§lBlaze Warden" : "§c§lPiglin Warlord"));
-        boss.setCustomNameVisible(true);
-        boss.addEffect(new MobEffectInstance(MobEffects.GLOWING, 20 * 60 * 30, 0, false, false));
-        boss.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 20 * 60 * 30, 0, false, false));
-        run.boss = boss.getUUID();
-        for (int i = 0; i < 2 + run.diff; i++)
-            spawnGuard(level, run, arena, run.fortress ? net.minecraft.world.entity.EntityTypes.BLAZE : net.minecraft.world.entity.EntityTypes.PIGLIN, false);
-        level.playSound(null, boss.blockPosition(), SoundEvents.WITHER_SPAWN, SoundSource.HOSTILE, 1.2f, 1.2f);
+        Mob body = spawnGuard(level, run, arena, ExpeditionBoss.hitboxType(run.fortress), true, arena.floorCenter());
+        if (body == null) return;
+        run.boss = body.getUUID();
+        run.fight = ExpeditionBoss.start(level, body, run.fortress, run.diff, Math.max(1, run.inside.size()), arena, run.layout.pillarSpots, new ExpeditionBoss.Hooks() {
+            @Override
+            public List<ServerPlayer> fighters() {
+                List<ServerPlayer> out = new ArrayList<>();
+                for (ServerPlayer p : inside(run)) if (isExpedition(p.level()) && arena.inside(p.getX(), p.getY(), p.getZ(), 1)) out.add(p);
+                return out;
+            }
+
+            @Override
+            public void minions(EntityType<? extends Mob> type, int count) {
+                for (int i = 0; i < count; i++) {
+                    Mob m = spawnGuard(level, run, arena, type, false);
+                    if (m != null) gear(level, run, m, type == net.minecraft.world.entity.EntityTypes.PIGLIN && RNG.nextBoolean());
+                }
+            }
+
+            @Override
+            public void minionAt(EntityType<? extends Mob> type, BlockPos at) {
+                Mob m = spawnGuard(level, run, arena, type, false, at);
+                if (m != null) gear(level, run, m, false);
+            }
+
+            @Override
+            public int minionsAlive() {
+                int n = 0;
+                for (Map.Entry<UUID, Object[]> e : GUARD_OF.entrySet()) {
+                    if (e.getValue()[0] != run || e.getValue()[1] != arena || e.getKey().equals(run.boss)) continue;
+                    Entity ent = level.getEntity(e.getKey());
+                    if (ent != null && ent.isAlive()) n++;
+                }
+                return n;
+            }
+        });
+        level.playSound(null, body.blockPosition(), SoundEvents.WITHER_SPAWN, SoundSource.HOSTILE, 1.2f, 0.8f);
         for (ServerPlayer m : inside(run)) {
-            Announce.title(m, run.fortress ? "§6§lBLAZE WARDEN" : "§c§lPIGLIN WARLORD", "§7The boss has woken!", 5, 50, 10);
-            Lobby.msg(m, "§c§lTHE BOSS IS HERE! §7Beat it for the §6Treasure Vault§7. §8(It glows - you can see it through walls.)");
+            Announce.title(m, ExpeditionBoss.name(run.fortress), "§7The boss has woken!", 5, 50, 10);
+            Lobby.msg(m, "§c§lTHE BOSS IS HERE! §7Beat the " + ExpeditionBoss.name(run.fortress) + " §7for the §6Treasure Vault§7. "
+                    + (run.fortress ? "§8(Back off when it rises for a slam, jump its ring of fire, and hit it hard while it's stuck.)"
+                    : "§8(Sidestep its charge - into a wall stuns it. Shields block its gold shards.)")
+                    + " §8Glowing, smoking floor is about to erupt - move!");
         }
+    }
+
+    /** 5.11: after anything in the expedition takes damage. */
+    private static void afterDamage(Entity entity, Entity attacker, float taken) {
+        if (taken <= 0) return;
+        if (entity instanceof ServerPlayer p) {
+            LAST_HURT.put(p.getUUID(), ticks);
+            // Withering arenas: every guard hit withers you.
+            if (attacker != null) {
+                Object[] g = GUARD_OF.get(attacker.getUUID());
+                if (g != null && g[1] instanceof ExpeditionRooms.Room room && twist(room) == WITHERING)
+                    p.addEffect(new MobEffectInstance(MobEffects.WITHER, 80, ((Run) g[0]).diff >= 2 ? 1 : 0));
+            }
+            return;
+        }
+        Object[] g = GUARD_OF.get(entity.getUUID());
+        if (g == null) return;
+        Run run = (Run) g[0];
+        if (run.fight != null && run.fight.body == entity) run.fight.afterHurt(taken);
     }
 
     private static void mobDied(Entity e, Entity killer) {
@@ -816,14 +1142,23 @@ public final class Expedition {
         }
         if (g != null && g[1] instanceof ExpeditionRooms.Room room && room.kind == ExpeditionRooms.CHEST) {
             room.guards.remove(e.getUUID());
-            if (guardsLeft(level, room) == 0) clearRoom(level, run, room);
-            else for (ServerPlayer m : inside(run)) if (room.inside(m.getX(), m.getY(), m.getZ(), 1)) Announce.actionBar(m, "§cGuards left: §f" + room.guards.size());
+            // A big magma cube splits about a second after it dies: wait for the little ones before deciding.
+            if (e.getType() == net.minecraft.world.entity.EntityTypes.MAGMA_CUBE && e.getBbWidth() > 0.8f) {
+                SPLITTING.merge(room, 1, Integer::sum);
+                Lobby.runLaterTicks(30, () -> Safe.run("expedition split check", () -> {
+                    SPLITTING.merge(room, -1, Integer::sum);
+                    checkRoom(level, run, room);
+                }));
+                return;
+            }
+            checkRoom(level, run, room);
         }
     }
 
     private static void bossDown(ServerLevel level, Run run) {
         if (run.bossDead) return;
         run.bossDead = true;
+        if (run.fight != null) run.fight.end();
         // The Treasure Vault appears in the middle of the arena.
         BlockPos chest = run.layout.arena.floorCenter();
         for (int i = 0; i < 6 && !level.getBlockState(chest).isAir(); i++) chest = chest.above();
@@ -898,6 +1233,8 @@ public final class Expedition {
     /** Home safely with everything carried: onto the deck (or the island home if the ship is gone). */
     static void extract(ServerPlayer p, Run run, String msg) {
         run.inside.remove(p.getUUID());
+        HEALTH_LOCK.remove(p.getUUID());
+        IN_FIGHT.remove(p.getUUID());
         PLAYER_RUN.remove(p.getUUID());
         Islands.Island is = islandById(run.islandId);
         ExpeditionShip.Ship ship = SHIPS.get(run.islandId);
@@ -919,6 +1256,8 @@ public final class Expedition {
     /** Dying (or quitting mid-fight): everything carried drops where they are, then home to the island. */
     static void died(ServerPlayer p, String why) {
         Run run = PLAYER_RUN.remove(p.getUUID());
+        HEALTH_LOCK.remove(p.getUUID());
+        IN_FIGHT.remove(p.getUUID());
         ServerLevel level = (ServerLevel) p.level();
         dropAll(p, level);
         p.setHealth(p.getMaxHealth());
@@ -984,6 +1323,19 @@ public final class Expedition {
         if (run.over) return;
         run.over = true;
         RUNS.remove(run.islandId);
+        if (run.fight != null) run.fight.end();
+        if (run.layout != null && run.layout.builder != null) run.layout.builder.release();
+        if (run.layout != null) {
+            for (ExpeditionRooms.Room r : run.layout.rooms) {
+                TWIST.remove(r);
+                WAVE_DUE.remove(r);
+                SPLITTING.remove(r);
+            }
+        }
+        for (UUID id : run.crew) {
+            HEALTH_LOCK.remove(id);
+            IN_FIGHT.remove(id);
+        }
         for (UUID id : new ArrayList<>(run.inside)) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
             if (p != null) extract(p, run, "§6Captain Wren hauls you back up!");
@@ -1028,6 +1380,69 @@ public final class Expedition {
     // Every second
     // =====================================================================
 
+    /** Every tick: building maps, the boss fights, and the health lock. */
+    private static void fastTick() {
+        if (server == null) return;
+        for (Run run : new ArrayList<>(RUNS.values())) {
+            if (run.over) continue;
+            if (run.building) {
+                boolean done = run.layout.builder.tick();
+                if (ticks % 10 == 0) {
+                    int pct = (int) Math.round(run.layout.builder.progress() * 100);
+                    for (UUID id : run.crew) {
+                        ServerPlayer m = server.getPlayerList().getPlayer(id);
+                        if (m != null) Announce.actionBar(m, "§6✈ Captain Wren is flying you to the Nether... §f" + pct + "%");
+                    }
+                }
+                if (done) arrive(run);
+                continue;
+            }
+            if (run.fight != null) run.fight.tick();
+            healthLock(run);
+        }
+    }
+
+    /**
+     * Leaving an active fight (a woken arena, or the boss) locks your health and absorption at what they
+     * were when you walked out, until you walk back in (or that fight ends). Breaks are fine; healing up isn't.
+     */
+    private static void healthLock(Run run) {
+        List<ExpeditionRooms.Room> fights = new ArrayList<>();
+        for (ExpeditionRooms.Room r : run.layout.rooms) if (r.active()) fights.add(r);
+        if (run.bossSpawned && !run.bossDead) fights.add(run.layout.arena);
+        for (ServerPlayer p : inside(run)) {
+            if (!isExpedition(p.level())) continue;
+            UUID id = p.getUUID();
+            Set<ExpeditionRooms.Room> was = IN_FIGHT.computeIfAbsent(id, k -> new HashSet<>());
+            Map<ExpeditionRooms.Room, float[]> locks = HEALTH_LOCK.computeIfAbsent(id, k -> new HashMap<>());
+            locks.keySet().removeIf(r -> !fights.contains(r));
+            was.removeIf(r -> !fights.contains(r));
+            for (ExpeditionRooms.Room r : fights) {
+                boolean in = r.inside(p.getX(), p.getY(), p.getZ(), 0.5);
+                if (in) {
+                    if (locks.remove(r) != null) tip(p, "§aBack in the fight - your health can go up again.");
+                    was.add(r);
+                } else if (was.remove(r)) {
+                    locks.put(r, new float[]{p.getHealth(), p.getAbsorptionAmount()});
+                    tip(p, "§eYou left the fight: §cyour health can't go up §euntil you go back into the " + r.name() + "§e.");
+                }
+            }
+            if (locks.isEmpty()) continue;
+            float capH = Float.MAX_VALUE, capA = Float.MAX_VALUE;
+            for (float[] v : locks.values()) {
+                capH = Math.min(capH, v[0]);
+                capA = Math.min(capA, v[1]);
+            }
+            if (p.getHealth() > capH) p.setHealth(capH);
+            if (p.getAbsorptionAmount() > capA) p.setAbsorptionAmount(capA);
+        }
+    }
+
+    private static String healthLockNote(ServerPlayer p) {
+        Map<ExpeditionRooms.Room, float[]> locks = HEALTH_LOCK.get(p.getUUID());
+        return locks == null || locks.isEmpty() ? "" : "§c❤ locked §8| ";
+    }
+
     private static void tick() {
         if (server == null) return;
         // Airships nobody used.
@@ -1046,6 +1461,7 @@ public final class Expedition {
     }
 
     private static void tickRun(Run run) {
+        if (run.building) return; // fastTick handles the flight
         long left = TIME_LIMIT_SECONDS - (ticks - run.startTick) / 20;
         if (left <= 0) {
             endRun(run, "time ran out");
@@ -1058,20 +1474,52 @@ public final class Expedition {
         ServerLevel nl = level();
         if (nl == null || run.layout == null) return;
         ExpeditionRooms.Layout lay = run.layout;
-        // Keep Wren's Landing clear of mobs.
+        // 5.10: only our guards live on the map - anything else that turns up goes.
+        for (Mob mob : nl.getEntitiesOfClass(Mob.class, new AABB(run.cx - run.half, ExpeditionRooms.SEA_Y - 10, run.cz - run.half,
+                run.cx + run.half, 200, run.cz + run.half), m -> !GUARD_OF.containsKey(m.getUUID()) && !m.entityTags().contains(NETHER_WREN_TAG))) mob.discard();
+        // Guards can't get into Wren's Landing either.
         ExpeditionRooms.Room sp = lay.spawn;
         for (Mob mob : nl.getEntitiesOfClass(Mob.class, new AABB(sp.x0 - 1, sp.y0 - 1, sp.z0 - 1, sp.x1 + 2, sp.y1 + 2, sp.z1 + 2),
-                m -> m instanceof Enemy && !GUARD_OF.containsKey(m.getUUID()))) mob.discard();
+                m -> GUARD_OF.containsKey(m.getUUID()))) {
+            Object[] g = GUARD_OF.get(mob.getUUID());
+            BlockPos back = roomSpot(nl, (ExpeditionRooms.Room) g[1]);
+            mob.teleportTo(back.getX() + 0.5, back.getY(), back.getZ() + 0.5);
+        }
+        // 5.11: waves on a timer - the next one comes even if the last isn't dead.
+        for (ExpeditionRooms.Room r : lay.rooms) {
+            if (!r.active() || r.waveComing || r.wave >= r.waves) continue;
+            Long due = WAVE_DUE.get(r);
+            if (due != null && ticks >= due) nextWave(nl, run, r);
+        }
         // Rooms wake when someone walks in; the arena once it's open.
         List<ServerPlayer> players = inside(run);
+        boolean burn = (ticks / 20) % 4 == 0;
         for (ServerPlayer p : players) {
             if (!isExpedition(p.level())) continue;
-            for (ExpeditionRooms.Room r : lay.rooms)
+            for (ExpeditionRooms.Room r : lay.rooms) {
                 if (!r.woke && r.inside(p.getX(), p.getY(), p.getZ(), 0)) wakeRoom(nl, run, r);
+                // 5.11: Blazing arenas set you alight now and then (fire resistance stops it).
+                if (burn && r.active() && twist(r) == BLAZING && r.inside(p.getX(), p.getY(), p.getZ(), 0.5) && !p.hasEffect(MobEffects.FIRE_RESISTANCE))
+                    p.setRemainingFireTicks(Math.max(p.getRemainingFireTicks(), 50));
+            }
             if (lay.arena.inside(p.getX(), p.getY(), p.getZ(), 0)) {
                 if (run.arenaOpen && !run.bossSpawned) spawnBoss(nl, run);
-                else if (!run.arenaOpen) tip(p, "§cThe Boss Arena opens after §f" + (run.unlockAt - run.cleared) + " §cmore room" + (run.unlockAt - run.cleared == 1 ? "" : "s") + ".");
+            } else if (!run.arenaOpen && lay.arena.inside(p.getX(), p.getY(), p.getZ(), 6)) {
+                tip(p, "§cThe gate opens after §f" + (run.unlockAt - run.cleared) + " §cmore arena" + (run.unlockAt - run.cleared == 1 ? "" : "s") + ".");
             }
+            for (ExpeditionRooms.Secret sec : lay.secrets) {
+                if (sec.found || !sec.inside(p.getX(), p.getY(), p.getZ())) continue;
+                sec.found = true;
+                nl.playSound(null, sec.chest, SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.PLAYERS, 1f, 1.4f);
+                for (ServerPlayer m : inside(run)) Lobby.msg(m, "§d§l✦ SECRET FOUND! §7" + p.getName().getString() + " found a hidden alcove with a little chest.");
+            }
+        }
+        // Blazing arenas smoulder while their fight is on.
+        for (ExpeditionRooms.Room r : lay.rooms) {
+            if (!r.active() || twist(r) != BLAZING) continue;
+            Vec3 c = r.center();
+            nl.sendParticles(ParticleTypes.FLAME, c.x, c.y + 0.2, c.z, 40, 14, 0.1, 14, 0.01);
+            nl.sendParticles(ParticleTypes.LAVA, c.x, c.y + 0.2, c.z, 6, 14, 0.1, 14, 0.0);
         }
         leashGuards(nl, run);
         // Status line and staying inside the area.
@@ -1126,16 +1574,28 @@ public final class Expedition {
 
     private static String statusLine(Run run, ServerPlayer p, Entity boss, long left) {
         String head = DIFF_COLORS[run.diff] + DIFF_NAMES[run.diff] + " §7" + (left / 60) + ":" + String.format("%02d", left % 60) + " §8| ";
-        if (boss instanceof Mob b && b.isAlive())
-            return head + (run.fortress ? "§6Blaze Warden" : "§cPiglin Warlord") + " §f" + (int) Math.ceil(b.getHealth()) + "/" + (int) b.getMaxHealth() + "❤";
+        if (boss instanceof Mob b && b.isAlive()) {
+            String extra = "";
+            if (run.fight != null) {
+                if (run.fight.shielded) extra = " §6§l[SHIELD " + (run.fight.shieldLeft / 20) + "s]";
+                else if (run.fight.weak()) extra = " §e§l[STUNNED - x2]";
+                if (run.fight.enraged) extra += " §4§l[ENRAGED]";
+            }
+            return head + ExpeditionBoss.name(run.fortress) + " §f" + (int) Math.ceil(b.getHealth()) + "/" + (int) b.getMaxHealth() + "❤" + extra;
+        }
         if (run.bossDead) return head + "§6Vault open! §7Go back to §6Wren's Landing §7to go home " + pointer(p, run.layout.spawn);
         ExpeditionRooms.Layout lay = run.layout;
         if (run.layout.spawn.inside(p.getX(), p.getY(), p.getZ(), 0.3) && run.cleared == 0)
-            return head + "§aSafe in Wren's Landing §8| §7rooms " + run.cleared + "/" + lay.rooms.size() + " " + nextTarget(run, p);
+            return head + "§aSafe in Wren's Landing §8| §7arenas " + run.cleared + "/" + lay.rooms.size() + " " + nextTarget(run, p);
         for (ExpeditionRooms.Room r : lay.rooms)
-            if (r.woke && !r.cleared && r.inside(p.getX(), p.getY(), p.getZ(), 1))
-                return head + r.name() + " §cguards left: §f" + r.guards.size();
-        return head + "§7rooms " + run.cleared + "/" + lay.rooms.size() + " " + nextTarget(run, p);
+            if (r.woke && !r.cleared && r.inside(p.getX(), p.getY(), p.getZ(), 1)) {
+                int tw = twist(r);
+                String next = "";
+                Long due = WAVE_DUE.get(r);
+                if (r.wave < r.waves && due != null && !r.waveComing) next = " §8| §7next wave §f" + Math.max(0, (due - ticks) / 20) + "s";
+                return head + r.name() + (tw >= 0 ? " " + TWIST_NAMES[tw] : "") + " §cwave " + r.wave + "/" + r.waves + " §7- guards: §f" + r.guards.size() + next;
+            }
+        return head + healthLockNote(p) + "§7arenas " + run.cleared + "/" + lay.rooms.size() + " " + nextTarget(run, p);
     }
 
     private static String nextTarget(Run run, ServerPlayer p) {
@@ -1227,7 +1687,7 @@ public final class Expedition {
         Lobby.msg(p, "§7Call Captain Wren's airship from §e/is §7-> Nether Expedition (or §e/expedition call§7). Prices: "
                 + DIFF_COLORS[0] + "Easy " + Economy.format(PRICES[0]) + "§7, " + DIFF_COLORS[1] + "Normal " + Economy.format(PRICES[1]) + "§7, "
                 + DIFF_COLORS[2] + "Hard " + Economy.format(PRICES[2]) + "§7, " + DIFF_COLORS[3] + "Nightmare " + Economy.format(PRICES[3]) + "§7.");
-        Lobby.msg(p, "§7Bring your own gear. §cDying loses everything you carry. §7Talk to Captain Wren in Wren's Landing to go home with your loot.");
+        Lobby.msg(p, "§7Bring your own gear - §cdiamond armor and golden apples are a must, even on Easy. §cDying loses everything you carry. §7Talk to Captain Wren in Wren's Landing to go home with your loot.");
         Run run = PLAYER_RUN.get(p.getUUID());
         if (run != null) Lobby.msg(p, "§eYou're on a " + DIFF_NAMES[run.diff] + " expedition: rooms cleared " + run.cleared + "/" + run.layout.rooms.size()
                 + (run.bossDead ? ", boss beaten!" : run.bossSpawned ? ", the boss is out!" : run.arenaOpen ? ", the arena is open!" : ""));

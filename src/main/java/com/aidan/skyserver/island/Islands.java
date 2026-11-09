@@ -296,6 +296,7 @@ public final class Islands {
         });
         IslandTime.init();
         protection();
+        ChestPages.init(); // 5.10: paged chests with a sort button (after protection, so its checks run first)
         net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((d, r, e) -> registerCommands(d));
         net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((d, r, e) -> d.register(Commands.literal("ic")
                 .then(Commands.argument("message", StringArgumentType.greedyString())

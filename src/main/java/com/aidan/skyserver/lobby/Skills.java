@@ -27,29 +27,38 @@ import java.util.*;
  *  Shepherd - shearing, breeding and milking animals on your island
  *  Fishing  - every fish caught (lobby pond or island)
  *  Combat   - kills in Skywars / Gold Wars, duel and Spleef wins
- *  Building - placing blocks on your island (up to 3,000 XP a day), Captain Wren's quests
- *
- * Tuned so each skill takes roughly 6-8 hours of focused play to max out (76,440 XP).
+ *  Building - placing blocks on your island (up to 5,000 XP a day), Captain Wren's quests
  *  Parkour  - obstacle courses, the maze and the elytra rings
+ *
+ * 5.10 balance: every skill earns roughly 10,000 XP an hour of focused play (the per-skill
+ * multipliers below even out the sources). Level 50 takes ~130,000 XP (about 13 hours) and
+ * Legends need another ~325,000 XP (about 32 hours) to reach 100. Old saves are converted so
+ * everyone keeps their level and how far they were into it.
  * Saved in config/skyserver/skills.json.
  */
 public final class Skills {
     public enum Skill {
-        MINING("Mining", "§7", "⛏"), FARMING("Farming", "§a", "🌾"), SHEPHERD("Shepherd", "§f", "🐑"), FISHING("Fishing", "§b", "🎣"),
-        COMBAT("Combat", "§c", "⚔"), BUILDING("Building", "§6", "🏠"), PARKOUR("Parkour", "§d", "🏃");
+        MINING("Mining", "§7", "⛏", 1.0), FARMING("Farming", "§a", "🌾", 0.45), SHEPHERD("Shepherd", "§f", "🐑", 0.5),
+        FISHING("Fishing", "§b", "🎣", 0.9), COMBAT("Combat", "§c", "⚔", 1.0), BUILDING("Building", "§6", "🏠", 1.0),
+        PARKOUR("Parkour", "§d", "🏃", 1.0);
 
         public final String title, color, icon;
+        /** Evens out how fast each skill earns XP (about 10,000 an hour for all of them). */
+        public final double rate;
 
-        Skill(String title, String color, String icon) {
+        Skill(String title, String color, String icon, double rate) {
             this.title = title;
             this.color = color;
             this.icon = icon;
+            this.rate = rate;
         }
     }
 
     public static final int MAX_LEVEL = 50;
     /** Legends of the Skies (finished all of Captain Wren's quests) can keep going to this level. */
     public static final int LEGEND_MAX_LEVEL = 100;
+    /** skills.json format: 2 = the 5.10 curve. Older files are converted on load. */
+    private static final int SAVE_VERSION = 2;
 
     public static boolean isLegend(UUID id) {
         return PlayerStats.get(id, "legend") > 0;
@@ -65,7 +74,7 @@ public final class Skills {
         for (int l = 1; l < level; l++) t += xpForNext(l);
         return t;
     }
-    public static final int BUILDING_DAILY_CAP = 3_000;
+    public static final int BUILDING_DAILY_CAP = 5_000;
 
     /** What a level unlocks, for the level-up message and /skills. */
     private static final Map<String, String> UNLOCKS = new HashMap<>();
@@ -82,6 +91,8 @@ public final class Skills {
     private static final Map<UUID, long[]> XP = new HashMap<>();          // per skill
     private static final Map<UUID, int[]> TODAY = new HashMap<>();        // {building xp today}
     private static final Map<UUID, Integer> FISH_SEEN = new HashMap<>();  // last fish-caught stat
+    /** Leftover fractions of XP per skill, so small amounts times the rate aren't lost. */
+    private static final Map<UUID, double[]> CARRY = new HashMap<>();
     /** XP earned today in each skill (for the Town NPCs' daily tasks). */
     private static final Map<UUID, long[]> XP_TODAY = new HashMap<>();
     private static String xpDay = "";
@@ -122,7 +133,14 @@ public final class Skills {
 
     // ---- Levels ----
 
+    /** XP from one level to the next. Levels 1-49: 150 rising to ~5,150. Legend levels 50-99: 5,400 rising to ~7,600. */
     public static int xpForNext(int level) {
+        if (level < MAX_LEVEL) return (int) Math.round(150 + 104.2 * (level - 1));
+        return (int) Math.round(5400 + 44.9 * (level - MAX_LEVEL));
+    }
+
+    /** The pre-5.10 curve, only used to convert old saves. */
+    private static int oldXpForNext(int level) {
         return 120 + 60 * (level - 1);
     }
 
@@ -141,6 +159,19 @@ public final class Skills {
         return new int[]{level, (int) left, level >= max ? 0 : xpForNext(level)};
     }
 
+    /** Converts old XP to the new curve, keeping the level and how far into it the player was. */
+    private static long convertOld(long oldXp) {
+        int level = 1;
+        long left = oldXp;
+        while (level < LEGEND_MAX_LEVEL && left >= oldXpForNext(level)) {
+            left -= oldXpForNext(level);
+            level++;
+        }
+        if (level >= LEGEND_MAX_LEVEL) return totalFor(LEGEND_MAX_LEVEL);
+        double frac = Math.min(1.0, left / (double) oldXpForNext(level));
+        return totalFor(level) + (long) Math.floor(frac * xpForNext(level));
+    }
+
     public static int level(UUID id, Skill s) {
         return levelOf(xp(id)[s.ordinal()], cap(id))[0];
     }
@@ -155,6 +186,12 @@ public final class Skills {
         if (p == null || amount <= 0 || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
         load();
         amount = Events.xp(amount);
+        // Even out the skills: small amounts keep their leftover fraction for next time.
+        double[] carry = CARRY.computeIfAbsent(p.getUUID(), k -> new double[Skill.values().length]);
+        double scaled = amount * s.rate + carry[s.ordinal()];
+        amount = (int) Math.floor(scaled);
+        carry[s.ordinal()] = scaled - amount;
+        if (amount <= 0) return;
         if (s == Skill.BUILDING) {
             String d = LocalDate.now().toString();
             if (!d.equals(today)) {
@@ -184,9 +221,14 @@ public final class Skills {
         if (after > before) save();
     }
 
+    /** Level-up money: $40 per level, plus a bit extra past level 10 since levels take longer now. */
+    public static long levelMoney(int lvl) {
+        return 40L * lvl + (lvl > 10 ? 20L * (lvl - 10) : 0);
+    }
+
     private static void levelUp(ServerPlayer p, Skill s, int lvl) {
         MinecraftServer server = p.level().getServer();
-        long money = 40L * lvl;
+        long money = levelMoney(lvl);
         Economy.add(server, p.getUUID(), p.getName().getString(), money);
         String unlock = UNLOCKS.get(s.name() + ":" + lvl);
         Lobby.msg(p, s.color + "§l" + s.icon + " " + s.title.toUpperCase() + " " + lvl + "! §a+" + Economy.format(money)
@@ -233,6 +275,7 @@ public final class Skills {
     public static void adminReset(UUID id) {
         load();
         XP.remove(id);
+        CARRY.remove(id);
         save();
     }
 
@@ -242,17 +285,32 @@ public final class Skills {
         if (loaded) return;
         loaded = true;
         JsonObject root = Stacks.readFile("skills.json");
+        int version = root.has("_version") ? root.get("_version").getAsInt() : 1;
+        boolean convert = version < SAVE_VERSION && !root.entrySet().isEmpty();
         for (Map.Entry<String, JsonElement> e : root.entrySet()) {
+            if (e.getKey().startsWith("_") || !e.getValue().isJsonArray()) continue;
             JsonArray a = e.getValue().getAsJsonArray();
             long[] v = new long[Skill.values().length];
-            for (int i = 0; i < v.length && i < a.size(); i++) v[i] = a.get(i).getAsLong();
-            XP.put(UUID.fromString(e.getKey()), v);
+            for (int i = 0; i < v.length && i < a.size(); i++) {
+                long old = a.get(i).getAsLong();
+                v[i] = convert ? convertOld(old) : old;
+            }
+            try {
+                XP.put(UUID.fromString(e.getKey()), v);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (convert) {
+            // Keep a copy of the old file, then save in the new format right away.
+            Stacks.writeFile("skills-before-5.10.json", root);
+            save();
         }
     }
 
     static void save() {
         dirty = false;
         JsonObject root = new JsonObject();
+        root.addProperty("_version", SAVE_VERSION);
         XP.forEach((k, v) -> {
             JsonArray a = new JsonArray();
             for (long x : v) a.add(x);
