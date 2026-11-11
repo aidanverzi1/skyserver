@@ -22,14 +22,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 5.11: the same for the Nether Expedition world. Its nether_wastes biome kept spawning ghasts,
  * zombified piglins, magma cubes and striders, which the expedition then deleted every second -
  * mobs popping in and out all over the map. Now only the expedition's own guards exist there.
+ *
+ * 5.14: the expedition world now refuses EVERY spawn-rule check, whatever the reason (natural, chunk
+ * generation, structure, patrol, reinforcement...), not just natural and chunk generation. The
+ * expedition's own guards, boss, helpers and Captain Wren don't go through this check (they are
+ * created directly), so they are not affected.
  */
 @Mixin(SpawnPlacements.class)
 public class IslandSpawnMixin {
     @Inject(method = "checkSpawnRules", at = @At("HEAD"), cancellable = true)
     private static void skyserver$noNaturalIslandSpawns(EntityType<?> type, ServerLevelAccessor level, EntitySpawnReason reason, BlockPos pos,
                                                         RandomSource random, CallbackInfoReturnable<Boolean> cir) {
-        if ((reason == EntitySpawnReason.NATURAL || reason == EntitySpawnReason.CHUNK_GENERATION)
-                && (Islands.isIsland(level.getLevel()) || Expedition.isExpedition(level.getLevel()))) {
+        if (Expedition.isExpedition(level.getLevel())
+                || ((reason == EntitySpawnReason.NATURAL || reason == EntitySpawnReason.CHUNK_GENERATION) && Islands.isIsland(level.getLevel()))) {
             cir.setReturnValue(false);
         }
     }

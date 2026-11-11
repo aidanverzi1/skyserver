@@ -37,6 +37,15 @@ import java.util.*;
  *  - Buys by situation: fireballs/TNT and tools that match the enemy bed's defence, a bow when people
  *    bridge at us, golden apples before fights, a Rescue Cloud after being knocked into the void.
  *
+ * 5.13 (fair play against real players):
+ *  - No gang-ups: at most ONE bot of a team goes after the same real player at a time (a "claim",
+ *    shared by the team's bots). Exceptions: a real player within GANG_UP_BED_RANGE blocks of the
+ *    team's own bed - then every bot of that team may fight him - and a bot he just hit hits back.
+ *  - A real player who is breaking a THIRD team's bed is left alone by everyone else (they want that
+ *    bed broken too), unless he hits them or comes for their own bed.
+ *  - Bed commit: once a bot is at an enemy bed it keeps breaking until the bed is gone (or it dies);
+ *    it only turns round to fight someone who is actually hitting it.
+ *
  * Like the real players, bots use the team chest: whenever they're home they put what they don't
  * need in it, and they take from it when it has what the next purchase or team upgrade is short of.
  */
@@ -44,6 +53,15 @@ public final class BedwarsBrain extends BotBrain {
     // ---- Team plan and roles, shared by a team's bots for one match ----
     private static final Map<BwTeam, Map<UUID, BwStrategy.Role>> ROLES = new EnumMap<>(BwTeam.class);
     private static int rolesMatch = -1;
+
+    /** 5.13: a real player this close to a team's bed may be fought by all of that team's bots. */
+    static final double GANG_UP_BED_RANGE = 8;
+    /** 5.13: a real player this close to a third team's bed counts as "breaking someone else's bed". */
+    static final double THIRD_BED_RANGE = 10;
+    /** 5.13: a claim on a real player lasts this many match ticks unless the bot keeps it up. */
+    static final long CLAIM_TICKS = 40;
+    /** 5.13: once this close to the enemy bed while attacking it, the bot commits to breaking it. */
+    static final double COMMIT_RANGE = 7, COMMIT_LEAVE_RANGE = 16;
 
     /** 5.9: what a team's bots share during a match (times are match ticks). */
     private static final class TeamState {
@@ -53,6 +71,9 @@ public final class BedwarsBrain extends BotBrain {
         long alarmUntil = -1, alarmLogged = -10_000;
         long lastBridger = -100_000;
         int lastMissing = -1;
+        /** 5.13: real player -> the one bot of this team going after him, and when it last said so. */
+        final Map<UUID, UUID> claim = new HashMap<>();
+        final Map<UUID, Long> claimAt = new HashMap<>();
     }
 
     private static final Map<BwTeam, TeamState> TEAM = new EnumMap<>(BwTeam.class);
@@ -72,6 +93,8 @@ public final class BedwarsBrain extends BotBrain {
     private long goingHomeUntil = 0;
     /** Team chest: next time we may use it, no banking until (just took something), stop at home between trips. */
     private long chestCooldown = 0, noBankUntil = 0, homeStopUntil = 0;
+    /** 5.13: the enemy team whose bed this bot is committed to breaking (-1 = none). */
+    private int commitBed = -1;
 
     /** 5.9 trips: where the bot is heading on a run, and how the stop at the generator is going. */
     private enum Trip { NONE, DIAMOND, EMERALD, HOME }
@@ -115,6 +138,7 @@ public final class BedwarsBrain extends BotBrain {
         trip = Trip.NONE;
         soloLoop = false;
         atGenSince = -1;
+        commitBed = -1;
         if (bot.getY() < BedwarsBots.floorY() - 6) {
             knockedOffAt = age;
             log("DECIDE", "knocked into the void - will buy a Rescue Cloud");
@@ -130,6 +154,7 @@ public final class BedwarsBrain extends BotBrain {
 
     public void onBedBroken(BwTeam victim) {
         if (target == victim.ordinal()) doing = "bed broken, hunting " + victim.display;
+        if (commitBed == victim.ordinal()) commitBed = -1;
     }
 
     // ---- For the training log ----
@@ -266,6 +291,7 @@ public final class BedwarsBrain extends BotBrain {
         log("STUCK", String.format("no progress for 15s at %.1f %.1f %.1f while '%s', %d blocks | %s", pos.x, pos.y, pos.z, doing, countBlocks(), pathDebug()));
         watchSince = age;
         clearPath();
+        commitBed = -1;
         if (doing.startsWith("putting spare") || doing.startsWith("taking resources")) chestCooldown = age + 1200; // can't get to the chest: forget it for a minute
         switch (role) {
             case RUSHER, HUNTER -> {
@@ -297,6 +323,7 @@ public final class BedwarsBrain extends BotBrain {
         if (match != BedwarsBots.matchNumber()) {
             match = BedwarsBots.matchNumber();
             target = -1;
+            commitBed = -1;
             ignore.clear();
             skipCell.clear();
             trip = Trip.NONE;
@@ -311,6 +338,7 @@ public final class BedwarsBrain extends BotBrain {
             atGenSince = -1;
             fightTarget = null;
             trip = Trip.NONE;
+            commitBed = -1;
         }
         BwStrategy.Plan plan = plan();
         int prot = BedwarsBots.upgradeLevels(team)[1];
@@ -323,10 +351,26 @@ public final class BedwarsBrain extends BotBrain {
         }
         if (bot.getHealth() < 10 && heal()) return;
 
+        // 5.13: committed to an enemy bed: keep breaking it; only turn round for someone actually hitting us.
+        if (committedBed()) {
+            ServerPlayer hitter = hittingMe(5);
+            if (hitter != null) {
+                doing = "fighting " + hitter.getName().getString() + " at the bed";
+                fight(hitter);
+                return;
+            }
+            target = commitBed;
+            stopShooting();
+            fightTarget = null;
+            breakBed(BwTeam.values()[commitBed]);
+            return;
+        }
+
         ServerPlayer bridger = bridgerToStop();
         ServerPlayer enemy = threat();
         if (enemy != null && (bridger == null || distanceTo(enemy) < 6)) {
             doing = "fighting " + enemy.getName().getString();
+            claim(enemy);
             fight(enemy);
             return;
         }
@@ -335,7 +379,10 @@ public final class BedwarsBrain extends BotBrain {
             rushHome();
             return;
         }
-        if (bridger != null && intercept(bridger)) return;
+        if (bridger != null && intercept(bridger)) {
+            claim(bridger);
+            return;
+        }
         intercepting = null;
         if (age < homeUntil) {
             collectHome("recovering after getting stuck");
@@ -356,6 +403,81 @@ public final class BedwarsBrain extends BotBrain {
             case RUSHER -> rush(plan);
             case HUNTER -> hunt(plan);
         }
+    }
+
+    // =====================================================================
+    // 5.13: fair play against real players (claims, third-party beds, bed commit)
+    // =====================================================================
+
+    private boolean isHuman(ServerPlayer e) {
+        return !BedwarsBots.isBot(e.getUUID());
+    }
+
+    /** True if e hit this bot in the last 3 seconds. */
+    private boolean hurtBy(ServerPlayer e) {
+        return bot.getLastHurtByMob() == e && bot.tickCount - bot.getLastHurtByMobTimestamp() < 60;
+    }
+
+    /** An enemy within `range` blocks who hit this bot in the last 3 seconds, or null. */
+    private ServerPlayer hittingMe(double range) {
+        if (!(bot.getLastHurtByMob() instanceof ServerPlayer e)) return null;
+        if (bot.tickCount - bot.getLastHurtByMobTimestamp() >= 60 || !BedwarsBots.alive(e.getUUID())) return null;
+        BwTeam et = BedwarsBots.team(e.getUUID());
+        if (et == null || et == team || distanceTo(e) > range) return null;
+        return e;
+    }
+
+    /** A real player close to our own bed: every bot of the team may fight him. */
+    private boolean nearOurBed(ServerPlayer e, double range) {
+        return BedwarsBots.bedAlive(team) && e.position().distanceTo(Vec3.atCenterOf(BedwarsBots.bedFoot(team))) < range;
+    }
+
+    /** A real player at a THIRD team's standing bed (not ours, not his own). */
+    private boolean atThirdBed(ServerPlayer e) {
+        BwTeam et = BedwarsBots.team(e.getUUID());
+        for (BwTeam t : BwTeam.values()) {
+            if (t == team || t == et || !BedwarsBots.bedAlive(t)) continue;
+            if (e.position().distanceTo(Vec3.atCenterOf(BedwarsBots.bedFoot(t))) < THIRD_BED_RANGE) return true;
+        }
+        return false;
+    }
+
+    /**
+     * May this bot go after e right now? Bots: always. Real players: not while he's breaking a third
+     * team's bed (unless he hit us or is at our bed), and only if no other bot of our team has him
+     * claimed (unless he's at our bed, or he hit us).
+     */
+    private boolean mayTarget(ServerPlayer e) {
+        if (!isHuman(e)) return true;
+        boolean hitMe = hurtBy(e);
+        if (nearOurBed(e, GANG_UP_BED_RANGE) || hitMe) return true;
+        if (atThirdBed(e) && !nearOurBed(e, THIRD_BED_RANGE + 1)) return false;
+        TeamState s = ts();
+        UUID owner = s.claim.get(e.getUUID());
+        if (owner == null || owner.equals(bot.getUUID())) return true;
+        long at = s.claimAt.getOrDefault(e.getUUID(), -1_000L);
+        return BedwarsBots.matchTicks() - at > CLAIM_TICKS || !BedwarsBots.alive(owner);
+    }
+
+    /** Marks a real player as this bot's (the rest of the team leaves him to us). */
+    private void claim(ServerPlayer e) {
+        if (e == null || !isHuman(e)) return;
+        TeamState s = ts();
+        UUID prev = s.claim.put(e.getUUID(), bot.getUUID());
+        s.claimAt.put(e.getUUID(), BedwarsBots.matchTicks());
+        if (prev == null || !prev.equals(bot.getUUID())) log("DECIDE", "I'll take " + e.getName().getString() + " (the rest of the team leaves him to me)");
+    }
+
+    /** Still committed to breaking an enemy bed? Drops the commitment when the bed is gone or we wandered off. */
+    private boolean committedBed() {
+        if (commitBed < 0) return false;
+        BwTeam tt = BwTeam.values()[commitBed];
+        if (!BedwarsBots.bedAlive(tt) || BedwarsBots.blanketed(tt)
+                || bot.getEyePosition().distanceTo(Vec3.atCenterOf(BedwarsBots.bedFoot(tt))) > COMMIT_LEAVE_RANGE) {
+            commitBed = -1;
+            return false;
+        }
+        return true;
     }
 
     // =====================================================================
@@ -447,8 +569,9 @@ public final class BedwarsBrain extends BotBrain {
         return team != null && BedwarsBots.bedAlive(team) && BedwarsBots.matchTicks() < ts().alarmUntil;
     }
 
-    /** Soft exception to the alarm: already at an enemy bed that's partly broken open. */
+    /** Soft exception to the alarm: committed to an enemy bed, or already at one that's partly broken open. */
     private boolean finishingEnemyBed() {
+        if (committedBed()) return true;
         if (target < 0) return false;
         BwTeam tt = BwTeam.values()[target];
         if (!BedwarsBots.bedAlive(tt)) return false;
@@ -568,6 +691,8 @@ public final class BedwarsBrain extends BotBrain {
             if (d > d().sight) continue;
             // Invisible people are only noticed up close (like a player would).
             if (e.hasEffect(net.minecraft.world.effect.MobEffects.INVISIBILITY) && d > 4) continue;
+            // 5.13: one bot per real player (except at our bed), and leave him alone at a third team's bed.
+            if (!mayTarget(e)) continue;
             boolean sees = bot.hasLineOfSight(e);
             boolean hurtMe = bot.getLastHurtByMob() == e && bot.tickCount - bot.getLastHurtByMobTimestamp() < 80;
             // Someone out on a bridge across a gap: running at them only walks us to the edge.
@@ -615,6 +740,7 @@ public final class BedwarsBrain extends BotBrain {
     /**
      * An enemy out on a bridge heading for our island, within INTERCEPT_RANGE of the base, that this
      * bot should deal with, or null. Bridgers further out are only noted (the home bot buys a bow).
+     * 5.13: a real bridger is met by one bot of the team (the claim), not all of them.
      */
     private ServerPlayer bridgerToStop() {
         if (!BedwarsBots.alive(bot.getUUID())) return null;
@@ -632,6 +758,7 @@ public final class BedwarsBrain extends BotBrain {
             ts().lastBridger = BedwarsBots.matchTicks();
             if (toBase > BwStrategy.INTERCEPT_RANGE) continue;
             if (groundTo(e.position()) && distanceTo(e) < 6) continue; // they've landed: normal fighting
+            if (!mayTarget(e)) continue;                               // 5.13: a teammate bot already has him
             if (toBase < bestD) {
                 bestD = toBase;
                 best = e;
@@ -1093,16 +1220,18 @@ public final class BedwarsBrain extends BotBrain {
             breakBed(tt);
             return;
         }
-        // No bed: hunt their players (nearest), or wait in their base.
+        // No bed: hunt their players (nearest), or wait in their base. 5.13: a real player another bot of ours has is left to it.
         ServerPlayer prey = null;
         double best = 1e9;
         for (ServerPlayer p : BedwarsBots.alivePlayers()) {
             if (BedwarsBots.team(p.getUUID()) != tt) continue;
+            if (!mayTarget(p)) continue;
             double d = distanceTo(p);
             if (d < best) { best = d; prey = p; }
         }
         if (prey != null && !ignore.containsKey(prey.getUUID())) {
             doing = "hunting " + prey.getName().getString();
+            claim(prey);
             if (best < 12) {
                 fight(prey);
                 return;
@@ -1121,6 +1250,11 @@ public final class BedwarsBrain extends BotBrain {
         Vec3 eye = bot.getEyePosition();
         BlockPos nearer = eye.distanceTo(Vec3.atCenterOf(foot)) < eye.distanceTo(Vec3.atCenterOf(head)) ? foot : head;
         double d = eye.distanceTo(Vec3.atCenterOf(nearer));
+        // 5.13: close to the bed: commit to breaking it.
+        if (d < COMMIT_RANGE && commitBed != tt.ordinal()) {
+            commitBed = tt.ordinal();
+            log("DECIDE", "at " + tt.display + "'s bed - breaking it no matter what");
+        }
         // Wool or wood around it and a fireball in hand: blow a hole from a few blocks away.
         if (d > 4 && d < 14 && age >= nextFireball && (targetDefence() & (BwStrategy.DEF_WOOL | BwStrategy.DEF_WOOD)) != 0) {
             int slot = findSlot(s -> Stacks.is(s, "bw_fireball"));

@@ -13,18 +13,27 @@ import java.time.LocalDate;
 import java.util.*;
 
 /**
- * The Bank (in the Town, or /bank anywhere). Money in the bank earns 1% interest once every 7 days,
- * on the first $250,000. Interest is paid when you're online; if you've been away longer than a
- * week you get one payment, not one for every week you missed. It's paid on the smallest amount
- * you had in the bank during the week, so depositing the day before doesn't count for the full week.
- * Withdraw any time. Saved in config/skyserver/bank.json.
+ * The Bank (in the Town, or /bank anywhere). Money in the bank earns 1% interest a week, COMPOUNDED
+ * DAILY (5.14): every day adds about 0.142% (1.01^(1/7) - 1), and each day's interest earns interest
+ * the next day, so a week adds exactly 1% and a month a little more than 4%. Interest counts on the
+ * first $250,000. It's paid when you're online (the first minute of every new day, and on login the
+ * next minute check); if you've been away longer than a week you get at most 7 days of interest, not
+ * every day you missed. It's earned on the smallest amount you had in the bank since the last payment,
+ * so depositing right before payday doesn't count. Withdraw any time. Saved in config/skyserver/bank.json.
  */
 public final class Bank {
-    public static final double RATE = 0.01;
+    /** 1% a week. */
+    public static final double WEEKLY_RATE = 0.01;
+    /** The daily rate that compounds to WEEKLY_RATE over 7 days. */
+    public static final double DAILY_RATE = Math.pow(1 + WEEKLY_RATE, 1.0 / 7) - 1;
+    /** Kept so anything that still reads the old names (menus, the guide) keeps compiling: 1% per 7 days. */
+    public static final double RATE = WEEKLY_RATE;
     public static final int DAYS = 7;
+    /** Most days of interest paid in one go (being away longer than a week doesn't pay extra). */
+    public static final int MAX_DAYS = 7;
     public static final long CAP = 250_000;
 
-    /** {balance, lowest balance this week, day the week started}. */
+    /** {balance, lowest balance since the last payment, day of the last payment}. */
     private static final Map<UUID, long[]> ACCOUNTS = new HashMap<>();
     private static boolean loaded = false;
 
@@ -59,19 +68,42 @@ public final class Bank {
         return account(id)[0];
     }
 
-    /** Pays the week's interest if a week has passed (only ever one payment at a time). */
+    /**
+     * The interest for `days` days of daily compounding on `base` (capped at CAP each day), before rounding.
+     * Public so it can be checked: 7 days on $100,000 = $1,000.
+     */
+    public static double compound(long base, int days) {
+        double total = 0;
+        for (int i = 0; i < days; i++) total += Math.min(base + total, CAP) * DAILY_RATE;
+        return total;
+    }
+
+    /**
+     * Pays the interest for every new day since the last payment (at most MAX_DAYS). A balance too small
+     * to earn a whole dollar in a day waits and is paid for several days at once (up to MAX_DAYS).
+     */
     static void interest(ServerPlayer p) {
         long[] a = account(p.getUUID());
-        if (today() - a[2] < DAYS) return;
+        long elapsed = today() - a[2];
+        if (elapsed < 1) return;
+        int days = (int) Math.min(elapsed, MAX_DAYS);
         long base = Math.min(a[1], CAP);
-        long pay = Math.round(base * RATE);
-        a[2] = today();
-        a[1] = a[0];
-        if (pay > 0) {
-            a[0] += pay;
-            a[1] = a[0];
-            Lobby.msg(p, "§6§lBANK: §aYou earned " + Economy.format(pay) + " interest §7(1% of " + Economy.format(base) + "). Balance: §6" + Economy.format(a[0]));
+        long pay = Math.round(compound(base, days));
+        if (pay <= 0) {
+            // Keep waiting only for a small, steady balance that's still adding up to its first dollar. Otherwise
+            // (empty account, a full week gone, or money was put back after a withdrawal) start counting afresh.
+            if (a[0] <= 0 || elapsed >= MAX_DAYS || a[1] < a[0]) {
+                a[2] = today();
+                a[1] = a[0];
+                save();
+            }
+            return;
         }
+        a[2] = today();
+        a[0] += pay;
+        a[1] = a[0];
+        Lobby.msg(p, "§6§lBANK: §aYou earned " + Economy.format(pay) + " interest §7(" + days + " day" + (days == 1 ? "" : "s")
+                + " of 1%-a-week interest on " + Economy.format(base) + "). Balance: §6" + Economy.format(a[0]));
         save();
     }
 
@@ -101,7 +133,7 @@ public final class Bank {
         boolean fresh = a[0] == 0;
         a[0] += amount;
         if (fresh) {
-            a[2] = today(); // a new week starts with your first deposit
+            a[2] = today(); // interest starts with your first deposit
             a[1] = a[0];
         }
         save();
@@ -124,8 +156,8 @@ public final class Bank {
     }
 
     private static String nextText(long[] a) {
-        long days = Math.max(0, a[2] + DAYS - today());
-        return "Next interest in " + days + " day" + (days == 1 ? "" : "s") + " (1% of the lowest balance this week, up to " + Economy.format(CAP) + ").";
+        return "Interest is 1% a week, added every day (about " + String.format(Locale.ROOT, "%.2f", DAILY_RATE * 100) + "% a day, compounding) on the lowest balance since your last payment, up to "
+                + Economy.format(CAP) + ".";
     }
 
     public static void show(ServerPlayer p) {

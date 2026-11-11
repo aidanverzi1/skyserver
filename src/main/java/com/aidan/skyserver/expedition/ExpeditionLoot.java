@@ -1,6 +1,7 @@
 package com.aidan.skyserver.expedition;
 
 import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -9,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 
 import java.util.*;
 
@@ -26,6 +28,16 @@ import java.util.*;
  * 5.11: the expedition got much harder, so rewards went up ~5% (money, shards, XP, gold, quartz,
  * diamond / golden apple / scrap chances). Netherite upgrade templates went DOWN by a fifth everywhere
  * (room chests 10/15/25% -> 8/12/20%; the Hard and Nightmare vault template 100% -> 80%).
+ *
+ * 5.13: Wren's Bounty (Voyage) adds one more roll to every rolled room-chest item, and the vault
+ * (= the boss died) tells ExpVoyage, which counts a cleared run for the crew.
+ *
+ * 5.14: enchanted books in the room chests. Every room chest has a BOOK_CHANCE (3%) of one extra book -
+ * a plain 3% roll per chest (Wren's Bounty doesn't add to it). The book is one of Sharpness, Protection,
+ * Power, Punch or Knockback (equal chances).
+ *   Easy / Normal:     a normal level (a random level from 1 up to the vanilla maximum).
+ *   Hard / Nightmare:  an EXTRA level, beyond vanilla (a random one of Sharpness VI-VII, Protection V-VII,
+ *                      Power VI-VII, Punch III-V, Knockback III-V; EnchantLevelMixin lets the anvil use them).
  *
  * No Wither skulls anywhere (Withers are blocked server-wide): Nightmare gives a shard bundle instead.
  */
@@ -53,6 +65,16 @@ public final class ExpeditionLoot {
     /** Nightmare first clear: exclusive title. */
     static final String CONQUEROR_TITLE = "title_conqueror";
 
+    /** 5.14: chance (%) that a room chest holds one enchanted book. */
+    static final int BOOK_CHANCE = 3;
+    /** 5.14: the book enchantments, and their vanilla maximum / highest level on this server (same order). */
+    private static final List<ResourceKey<Enchantment>> BOOK_ENCHANTS =
+            List.of(Enchantments.SHARPNESS, Enchantments.PROTECTION, Enchantments.POWER, Enchantments.PUNCH, Enchantments.KNOCKBACK);
+    private static final int[] VANILLA_MAX = {5, 4, 5, 2, 2}, SERVER_MAX = {7, 7, 7, 5, 5};
+
+    /** 5.13: extra rolls per rolled item while filling one room chest (Wren's Bounty). */
+    private static int bonusRolls = 0;
+
     private static ItemStack s(Item item, int n) {
         return new ItemStack(item, Math.max(1, n));
     }
@@ -64,7 +86,7 @@ public final class ExpeditionLoot {
     /** Adds `slots` separate rolls of `chance`% for one of `item`. Returns how many hit. */
     private static int rolls(List<ItemStack> out, Random rng, Item item, int slots, int chance) {
         int hit = 0;
-        for (int i = 0; i < slots; i++) {
+        for (int i = 0; i < slots + bonusRolls; i++) {
             if (rng.nextInt(100) < chance) {
                 out.add(new ItemStack(item));
                 hit++;
@@ -79,6 +101,25 @@ public final class ExpeditionLoot {
             s.enchant(e, lvl);
         } catch (RuntimeException ignored) {
         }
+    }
+
+    /** 5.14: an enchanted book holding one enchantment at the given level (the level may be above vanilla's maximum). */
+    static ItemStack book(ServerLevel level, ResourceKey<Enchantment> key, int lvl) {
+        ItemStack b = new ItemStack(Items.ENCHANTED_BOOK);
+        try {
+            ItemEnchantments.Mutable m = new ItemEnchantments.Mutable(ItemEnchantments.EMPTY);
+            m.set(level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(key), lvl);
+            b.set(DataComponents.STORED_ENCHANTMENTS, m.toImmutable());
+        } catch (RuntimeException ignored) {
+        }
+        return b;
+    }
+
+    /** 5.14: the chest's random book for this difficulty (see the class comment). */
+    static ItemStack randomBook(ServerLevel level, int d, Random rng) {
+        int i = rng.nextInt(BOOK_ENCHANTS.size());
+        int lvl = d >= 2 ? between(rng, VANILLA_MAX[i] + 1, SERVER_MAX[i]) : between(rng, 1, VANILLA_MAX[i]);
+        return book(level, BOOK_ENCHANTS.get(i), lvl);
     }
 
     private static final Item[] DIAMOND_ARMOR = {Items.DIAMOND_HELMET, Items.DIAMOND_CHESTPLATE, Items.DIAMOND_LEGGINGS, Items.DIAMOND_BOOTS};
@@ -98,6 +139,15 @@ public final class ExpeditionLoot {
      * put in (the vault uses it for Easy/Normal).
      */
     static List<ItemStack> chestLoot(ServerLevel level, int d, boolean fortress, Random rng, int[] scrap) {
+        bonusRolls = ExpVoyage.bonusRolls();
+        try {
+            return chestLoot0(level, d, fortress, rng, scrap);
+        } finally {
+            bonusRolls = 0;
+        }
+    }
+
+    private static List<ItemStack> chestLoot0(ServerLevel level, int d, boolean fortress, Random rng, int[] scrap) {
         List<ItemStack> out = new ArrayList<>();
         Item rod = fortress ? Items.BLAZE_ROD : Items.CRYING_OBSIDIAN;
         switch (d) {
@@ -143,12 +193,15 @@ public final class ExpeditionLoot {
                 rolls(out, rng, Items.TOTEM_OF_UNDYING, 1, 10);
             }
         }
+        // 5.14: a flat 3% per chest (not boosted by Wren's Bounty) for one book.
+        if (rng.nextInt(100) < BOOK_CHANCE) out.add(randomBook(level, d, rng));
         Collections.shuffle(out, rng);
         return out;
     }
 
     /** What's in the Treasure Vault chest (shared: whoever takes it). roomScrap = scrap that came out of the room chests. */
     static List<ItemStack> vault(ServerLevel level, int d, Random rng, int roomScrap) {
+        com.aidan.skyserver.Safe.run("expedition voyage boss", () -> ExpVoyage.bossKilled(level, d)); // 5.13
         List<ItemStack> out = new ArrayList<>();
         switch (d) {
             case 0 -> {

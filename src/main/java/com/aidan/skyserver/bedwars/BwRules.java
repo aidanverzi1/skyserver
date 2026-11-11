@@ -6,9 +6,17 @@ import java.util.*;
  * Every Bedwars number in one place: generator speeds, the match timeline, shop prices and team
  * upgrades. Plain Java, so the offline simulator plays with exactly the same numbers as the server.
  * Change a number here and both the game and the bots follow it.
+ *
+ * 5.13: two Voyage switches, set by BwVoyage when a match starts: fireballFrenzy (fireballs half
+ * price) and rushHour (the faster timeline in Event.rushMinute).
  */
 public final class BwRules {
     private BwRules() {}
+
+    /** 5.13 Voyage: Fireball Frenzy this match (fireballs cost half). */
+    public static boolean fireballFrenzy = false;
+    /** 5.13 Voyage: Rush Hour this match (events every 4 minutes, beds at 20, sudden death at 25). */
+    public static boolean rushHour = false;
 
     // =====================================================================
     // Teams and match length
@@ -84,24 +92,27 @@ public final class BwRules {
     // Timeline (minutes into the match)
     // =====================================================================
     public enum Event {
-        DIAMOND_2(6, "Diamond II"),
-        EMERALD_2(12, "Emerald II"),
-        DIAMOND_3(18, "Diamond III"),
-        EMERALD_3(24, "Emerald III"),
-        BEDS_GONE(30, "Bed Destruction"),
-        SUDDEN_DEATH(35, "Sudden Death"),
-        GAME_END(45, "Game End");
+        DIAMOND_2(6, 4, "Diamond II"),
+        EMERALD_2(12, 8, "Emerald II"),
+        DIAMOND_3(18, 12, "Diamond III"),
+        EMERALD_3(24, 16, "Emerald III"),
+        BEDS_GONE(30, 20, "Bed Destruction"),
+        SUDDEN_DEATH(35, 25, "Sudden Death"),
+        GAME_END(45, 35, "Game End");
 
         public final int minute;
+        /** 5.13: the minute during a Rush Hour Voyage match. */
+        public final int rushMinute;
         public final String display;
 
-        Event(int minute, String display) {
+        Event(int minute, int rushMinute, String display) {
             this.minute = minute;
+            this.rushMinute = rushMinute;
             this.display = display;
         }
 
         public long tick() {
-            return minute * 60L * 20L;
+            return (rushHour ? rushMinute : minute) * 60L * 20L;
         }
     }
 
@@ -195,10 +206,11 @@ public final class BwRules {
     /** Item prices that are different in 2v2v2v2 (Hypixel Solo/Doubles): offer id -> cost. */
     private static final Map<String, Integer> DUOS_COST = Map.of("tnt", 4);
 
-    /** What an offer costs in the current mode (same currency in both modes). */
+    /** What an offer costs in the current mode (same currency in both modes). 5.13: fireballs half price in a Fireball Frenzy match. */
     public static int cost(Offer o) {
-        if (mode == Mode.DUOS && DUOS_COST.containsKey(o.id())) return DUOS_COST.get(o.id());
-        return o.cost();
+        int c = mode == Mode.DUOS && DUOS_COST.containsKey(o.id()) ? DUOS_COST.get(o.id()) : o.cost();
+        if (fireballFrenzy && o.id().equals("fireball")) c = Math.max(1, c / 2);
+        return c;
     }
 
     // ---- Tool levels ----

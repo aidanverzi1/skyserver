@@ -93,7 +93,7 @@ import java.util.*;
  *     5.11 (much harder): 3 waves on Easy/Normal, 4 on Hard/Nightmare, and they OVERLAP - the next wave
  *     comes on a timer even if the last one isn't dead. Guards wear armor and carry enchanted weapons,
  *     archers (skeletons, blazes, crossbow piglins) take the balconies, the last wave brings a captain
- *     (Wither Knight / Brute Warlord), and every arena has a twist: Blazing, Ambush or Withering.
+ *     (Wither Knight / Brute Warlord), and every arena has a twist: Ambush or Withering.
  *     No doors lock, but if you leave a fight your health and absorption can't go up until you walk back in.
  *     Beat every wave and the chest opens. After every arena (Easy/Normal) or all but one (Hard/Nightmare)
  *     the Boss Arena's gate opens: the Cinder Colossus (Fortress) or Gilded Tyrant (Bastion), custom
@@ -107,6 +107,24 @@ import java.util.*;
  * The expedition world is wiped every server start (fresh terrain, no disk build-up). Nothing about
  * runs is saved: a restart sends everyone home with what they carry. Nothing spawns there naturally
  * (IslandSpawnMixin, 5.11).
+ *
+ * 5.14:
+ *  - The Blazing twist (burning floor + an extra fire mob every wave) is gone. Ambush and Withering are unchanged.
+ *  - The next wave now comes after 40 seconds on every difficulty (was 25/22/20/18; Ambush arenas still 5 fewer).
+ *  - Stray mobs: any mob that is not one of ours (guard, boss, helper, Wren, magma split) is removed one
+ *    tick after it appears in the expedition world - before, strays were swept once a second, which looked
+ *    like mobs popping in and out. Every removal is logged ("[Expedition] removed a stray ...", first 40
+ *    per server start) so the log shows what kind of mob it was and where. IslandSpawnMixin also refuses
+ *    every spawn-rule check in this world now.
+ *
+ * 5.15:
+ *  - REVIVE: once per player per trip, a hit that would kill you puts you DOWN instead: you can't move or be
+ *    hurt, guards ignore you, and for 30 seconds chat offers [Revive] for 20% of the trip's price (your own
+ *    money) or [Give up]. Revive = full health where you fell, everything kept, 5 seconds where nothing can
+ *    hurt you (if you fell into lava you come back in Wren's Landing instead). Give up, no answer, no money,
+ *    quitting, or the trip ending while you're down = a normal death. A Totem of Undying is used first.
+ *  - Time limit by difficulty: 30 / 35 / 45 / 60 minutes (was 30 for all).
+ *  - Withering arenas: a guard's hit withers you half the time (was every hit).
  */
 public final class Expedition {
     public static final ResourceKey<Level> DIM = ResourceKey.create(Registries.DIMENSION, Identifier.fromNamespaceAndPath(Skyserver.MOD_ID, "expedition"));
@@ -119,27 +137,37 @@ public final class Expedition {
     static final int[] ROOMS = {3, 4, 5, 6};
     /** 5.11: guards in each wave (every extra crew member in the Nether adds 1 to every wave). */
     static final int[][] WAVES = {{3, 4, 5}, {4, 5, 6}, {4, 5, 6, 7}, {5, 6, 7, 8}};
-    /** 5.11: seconds until the next wave comes anyway (Ambush arenas: 5 fewer). */
-    static final int[] WAVE_SECONDS = {25, 22, 20, 18};
+    /** Seconds until the next wave comes anyway (Ambush arenas: 5 fewer). 5.14: 40 on every difficulty (was 25/22/20/18). */
+    static final int[] WAVE_SECONDS = {40, 40, 40, 40};
     /** Old 5.10 guard counts (no longer used for waves; kept so nothing that reads it breaks). */
     static final int[] GUARDS = {3, 4, 6, 8};
     /** Extra health / damage for every guard and the boss (0.5 = +50%). 5.11: raised. */
     static final double[] HEALTH = {0.2, 0.4, 0.75, 1.3}, DAMAGE = {0.1, 0.3, 0.6, 1.0};
     /** 5.11: the last wave's captain gets this much more health on top (2.0 = +200%). */
     static final double[] CAPTAIN_HEALTH = {2.0, 2.5, 3.0, 3.5};
-    /** 5.11 arena twists. */
-    static final int BLAZING = 0, AMBUSH = 1, WITHERING = 2;
-    static final String[] TWIST_NAMES = {"§6§lBlazing", "§c§lAmbush", "§8§lWithering"};
-    static final String[] TWIST_TIPS = {"§7The floor burns - fire resistance helps", "§7They come through every doorway at once", "§7Every hit withers you"};
+    /** Arena twists. 5.14: Blazing removed (Ambush and Withering unchanged). */
+    static final int AMBUSH = 0, WITHERING = 1;
+    static final String[] TWIST_NAMES = {"§c§lAmbush", "§8§lWithering"};
+    static final String[] TWIST_TIPS = {"§7They come through every doorway at once", "§7Half their hits wither you"};
+    /** 5.15: chance (%) that a guard's hit in a Withering arena withers you (was every hit). */
+    static final int WITHER_CHANCE = 50;
     /** Seconds a guard may spend outside its room before it's sent back. */
     static final int LEASH_SECONDS = 3;
-    static final int TIME_LIMIT_SECONDS = 30 * 60;
+    /** 5.15: the time limit by difficulty (Easy 30, Normal 35, Hard 45, Nightmare 60 minutes). */
+    static final int[] TIME_LIMITS = {30 * 60, 35 * 60, 45 * 60, 60 * 60};
+    /** The old single limit (Easy's); kept so anything that still reads it compiles. */
+    static final int TIME_LIMIT_SECONDS = TIME_LIMITS[0];
+    /** 5.15 revive: its price as a share of the trip's price, seconds to decide, and ticks of protection afterwards. */
+    static final double REVIVE_SHARE = 0.20;
+    static final int REVIVE_SECONDS = 30, REVIVE_PROTECT_TICKS = 100;
     /** An airship nobody sails within this many seconds leaves and the deposit/ticket comes back. */
     static final int SHIP_WAIT_SECONDS = 10 * 60;
     /** Quitting within this many seconds of being hurt counts as dying. */
     static final int COMBAT_LOG_SECONDS = 15;
     static final String GUARD_TAG = "skyserver_expguard";
     public static final String NETHER_WREN_TAG = "skyserver_expwren";
+    /** 5.14: how many stray-mob removals are written to the log per server start. */
+    static final int STRAY_LOG_LIMIT = 40;
 
     /** A called airship that hasn't sailed yet. */
     static final class Pending {
@@ -157,6 +185,8 @@ public final class Expedition {
         UUID leader;
         final Set<UUID> crew = new LinkedHashSet<>();
         final Set<UUID> inside = new LinkedHashSet<>();
+        /** 5.15: players who already used their one revive on this trip. */
+        final Set<UUID> revived = new HashSet<>();
         long startTick;
         BlockPos landing;
         double cx, cz;
@@ -194,8 +224,15 @@ public final class Expedition {
     private static final Map<ExpeditionRooms.Room, Integer> TWIST = new HashMap<>();
     private static final Map<ExpeditionRooms.Room, Long> WAVE_DUE = new HashMap<>();
     private static final Map<ExpeditionRooms.Room, Integer> SPLITTING = new HashMap<>();
+    /** 5.15: a player who is down and deciding whether to revive: their run, when the offer ends, where they fell. */
+    private record Downed(Run run, long deadline, double x, double z) {}
+    private static final Map<UUID, Downed> DOWNED = new HashMap<>();
+    /** 5.15: player -> server tick until which nothing can hurt them (just revived). */
+    private static final Map<UUID, Long> PROTECTED = new HashMap<>();
     private static int runCounter = 0;
     private static long ticks = 0;
+    /** 5.14: stray-mob removals logged so far. */
+    private static int strayLogs = 0;
     private static final Random RNG = new Random();
 
     private Expedition() {}
@@ -251,13 +288,28 @@ public final class Expedition {
         ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
             if (!(entity instanceof ServerPlayer p) || p instanceof BotPlayer || !isExpedition(p.level())) return true;
             if (p.getMainHandItem().is(Items.TOTEM_OF_UNDYING) || p.getOffhandItem().is(Items.TOTEM_OF_UNDYING)) return true; // the totem saves them
-            Safe.run("expedition death", () -> died(p, "died"));
+            // 5.15: already down and deciding - nothing can finish them off.
+            if (DOWNED.containsKey(p.getUUID())) {
+                p.setHealth(1f);
+                return false;
+            }
+            // 5.15: once per trip they may pay to revive; otherwise (or if they can't) it's a normal death.
+            Safe.run("expedition death", () -> {
+                if (!offerRevive(p)) died(p, "died");
+            });
             return false;
         });
         // Wren's Landing is safe; guards can only be hurt by someone standing in their room.
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
             if (!isExpedition(entity.level())) return true;
             if (entity instanceof ServerPlayer p) {
+                // 5.15: down (deciding on a revive) or just revived: nothing hurts them.
+                if (DOWNED.containsKey(p.getUUID())) return false;
+                Long safeUntil = PROTECTED.get(p.getUUID());
+                if (safeUntil != null) {
+                    if (ticks < safeUntil) return false;
+                    PROTECTED.remove(p.getUUID());
+                }
                 Run run = PLAYER_RUN.get(p.getUUID());
                 return run == null || run.layout == null || !run.layout.spawn.inside(p.getX(), p.getY(), p.getZ(), 0.3);
             }
@@ -286,9 +338,19 @@ public final class Expedition {
             Safe.run("expedition mob death", () -> mobDied(entity, source.getEntity()));
         });
         // 5.11: the little magma cubes a guard splits into become guards of the same arena.
+        // 5.14: any OTHER mob that isn't ours is removed a tick after it appears (and logged), instead of
+        // waiting for the once-a-second sweep - that wait was the "mobs popping in and out".
         ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
-            if (!isExpedition(world) || entity.getType() != net.minecraft.world.entity.EntityTypes.MAGMA_CUBE || GUARD_OF.containsKey(entity.getUUID())) return;
-            if (entity instanceof Mob m) Safe.run("expedition split", () -> adoptSplit(m));
+            if (!isExpedition(world) || !(entity instanceof Mob m) || GUARD_OF.containsKey(entity.getUUID())) return;
+            if (entity.getType() == net.minecraft.world.entity.EntityTypes.MAGMA_CUBE) {
+                Safe.run("expedition split", () -> adoptSplit(m));
+                return;
+            }
+            if (ours(m)) return;
+            Lobby.runLaterTicks(1, () -> Safe.run("expedition stray", () -> {
+                if (m.isRemoved() || ours(m)) return;
+                removeStray(m, "as it appeared");
+            }));
         });
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
             if (!isExpedition(level) || level.isClientSide() || !(player instanceof ServerPlayer sp)) return InteractionResult.PASS;
@@ -333,6 +395,8 @@ public final class Expedition {
                     Lobby.msg(c.getSource().getPlayerOrException(), "§6[Captain Wren] §fRight you are! I'll keep the kettle on. Come back when you're ready.");
                     return 1;
                 }))
+                .then(Commands.literal("revive").executes(c -> { revive(c.getSource().getPlayerOrException()); return 1; }))
+                .then(Commands.literal("giveup").executes(c -> { giveUp(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("help").executes(c -> { howItWorks(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("call").executes(c -> { ExpeditionMenu.openSummon(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("admin").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
@@ -349,6 +413,22 @@ public final class Expedition {
                                     c.getSource().sendSuccess(() -> Component.literal("Gave yourself a " + DIFF_NAMES[dd] + " expedition ticket."), false);
                                     return 1;
                                 }))))));
+    }
+
+    /** 5.14: is this mob one of the expedition's own (a recorded or tagged guard / boss / helper, or Captain Wren)? */
+    private static boolean ours(Mob m) {
+        return GUARD_OF.containsKey(m.getUUID()) || m.entityTags().contains(GUARD_TAG) || m.entityTags().contains(NETHER_WREN_TAG);
+    }
+
+    /** 5.14: takes a mob that isn't ours out of the expedition world and says so in the log (first STRAY_LOG_LIMIT only). */
+    private static void removeStray(Mob m, String when) {
+        if (strayLogs < STRAY_LOG_LIMIT) {
+            strayLogs++;
+            Skyserver.LOGGER.info("[Expedition] removed a stray {} at {} {} {} ({}){}", m.getType().getDescriptionId(),
+                    Math.round(m.getX()), Math.round(m.getY()), Math.round(m.getZ()), when,
+                    strayLogs == STRAY_LOG_LIMIT ? " - no more of these will be logged until the next restart" : "");
+        }
+        m.discard();
     }
 
     /** Ends every running expedition (everyone keeps what they carry). Also used by /mod endexpeditions. */
@@ -636,7 +716,8 @@ public final class Expedition {
                     + " even if the last isn't dead. A captain leads the last wave.");
             Lobby.msg(m, "§7Clear §f" + run.unlockAt + " §7arena" + (run.unlockAt == 1 ? "" : "s") + " to open the §cBoss Arena§7's gate. "
                     + "§eLeaving a fight locks your health until you go back in. §c§lIf you die, you lose everything you're carrying. §7Talk to §6Captain Wren §7here to go home. ("
-                    + (TIME_LIMIT_SECONDS / 60) + " minutes)");
+                    + (TIME_LIMITS[run.diff] / 60) + " minutes)");
+            Lobby.msg(m, "§7Once this trip, if you go down, you can §arevive §7for §6" + Economy.format(reviveCost(run)) + " §7and keep everything.");
         }
         if (run.inside.isEmpty()) endRun(run, "nobody came");
     }
@@ -701,8 +782,8 @@ public final class Expedition {
         Lobby.msg(p, " §7- The platforms around it hold §cchest arenas §7(coloured stripes over the doorways). Walk in and the first wave comes;"
                 + " " + waves + " waves in all, and §cthe next one won't wait §7for you to finish the last. Archers take the balconies,"
                 + " and a §4captain §7leads the last wave. Guards stay in their arena, and you can only hurt them from inside.");
-        Lobby.msg(p, " §7- Every arena has a twist: " + TWIST_NAMES[BLAZING] + " §7(burning floor - fire resistance helps), "
-                + TWIST_NAMES[AMBUSH] + " §7(they pour in through every doorway), " + TWIST_NAMES[WITHERING] + " §7(their hits wither you).");
+        Lobby.msg(p, " §7- Every arena has a twist: " + TWIST_NAMES[AMBUSH] + " §7(they pour in through every doorway) or "
+                + TWIST_NAMES[WITHERING] + " §7(half their hits wither you).");
         Lobby.msg(p, " §7- Doors never lock - but if you walk out of a fight, your §chealth can't go up §7until you walk back in.");
         Lobby.msg(p, " §7- Beat every wave and the chest opens. The stripes turn §agreen §7when an arena is done.");
         Lobby.msg(p, " §7- Clear " + (run == null ? "enough" : String.valueOf(run.unlockAt)) + " arenas and the §cBoss Arena§7's gate opens. Beat the boss for the §6Treasure Vault§7."
@@ -710,6 +791,8 @@ public final class Expedition {
         Lobby.msg(p, " §7- Bridges have rails, but break a rail or the floor and it's a long drop into lava. §dCracked bricks at floor level hide secrets.");
         Lobby.msg(p, " §7- The line above your hotbar points to the next arena. Mine and build all you like - what you carry comes home.");
         Lobby.msg(p, " §c- If you die, you drop everything you carry. §7Talk to me in here to go home safe.");
+        Lobby.msg(p, " §a- Once per trip, when you'd die, you get " + REVIVE_SECONDS + " seconds to §frevive §afor " + (int) Math.round(REVIVE_SHARE * 100)
+                + "% of the trip's price" + (run == null ? "" : " (" + Economy.format(reviveCost(run)) + ")") + ": full health, right where you fell, nothing lost.");
     }
 
     // =====================================================================
@@ -785,37 +868,40 @@ public final class Expedition {
     }
 
     /**
-     * 5.12: the closest spot to `near` (inside the room) with solid floor and open air `half` blocks
-     * around and `height` blocks up - so a big mob doesn't spawn inside a pillar or a wall. Falls back
-     * to a normal free floor spot, then to `near`.
+     * 5.12: the nearest spot to `near` (within 12 blocks, up to 3 up or down) where a BIG mob fits: a sturdy
+     * floor under, and nothing to bump into in, a box (2 x half + 1) wide and `height` tall. If there is
+     * none: a normal room spot, and without a room, `near` itself.
      */
-    private static BlockPos bigSpot(ServerLevel level, ExpeditionRooms.Room r, BlockPos near, int half, int height) {
+    private static BlockPos bigSpot(ServerLevel level, ExpeditionRooms.Room room, BlockPos near, int half, int height) {
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-        for (int rad = 0; rad <= 12; rad++) {
-            for (int dx = -rad; dx <= rad; dx++) {
-                for (int dz = -rad; dz <= rad; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != rad) continue; // just the ring at this distance
-                    int x = near.getX() + dx, z = near.getZ() + dz;
-                    if (x - half < r.x0 || x + half > r.x1 || z - half < r.z0 || z + half > r.z1) continue;
-                    for (int y = Math.max(r.y0, near.getY() - 2); y <= Math.min(r.y1 - height, near.getY() + 3); y++) {
-                        if (clearBox(level, m, x, y, z, half, height)) return new BlockPos(x, y, z);
+        for (int ring = 0; ring <= 12; ring++) {
+            for (int dx = -ring; dx <= ring; dx++) {
+                for (int dz = -ring; dz <= ring; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue; // only the edge of this ring (nearest first)
+                    for (int dy = 0; dy <= 3; dy++) {
+                        for (int sign = 1; sign >= -1; sign -= 2) {
+                            if (dy == 0 && sign < 0) continue;
+                            int x = near.getX() + dx, y = near.getY() + dy * sign, z = near.getZ() + dz;
+                            if (clearBox(level, m, x, y, z, half, height)) return new BlockPos(x, y, z);
+                        }
                     }
                 }
             }
         }
-        for (int tries = 0; tries < 30; tries++) {
-            BlockPos s = roomSpot(level, r);
-            if (clearBox(level, m, s.getX(), s.getY(), s.getZ(), Math.min(half, 1), Math.min(height, 3))) return s;
-        }
-        return near;
+        return room != null ? roomSpot(level, room) : near;
     }
 
+    /** 5.12: is there a sturdy floor under, and no collision shape inside, the box around (x, y, z)? */
     private static boolean clearBox(ServerLevel level, BlockPos.MutableBlockPos m, int x, int y, int z, int half, int height) {
-        if (!level.getBlockState(m.set(x, y - 1, z)).isFaceSturdy(level, m, net.minecraft.core.Direction.UP)) return false;
-        for (int dx = -half; dx <= half; dx++)
-            for (int dz = -half; dz <= half; dz++)
-                for (int dy = 0; dy < height; dy++)
-                    if (!level.getBlockState(m.set(x + dx, y + dy, z + dz)).getCollisionShape(level, m).isEmpty()) return false;
+        for (int dx = -half; dx <= half; dx++) {
+            for (int dz = -half; dz <= half; dz++) {
+                if (!level.getBlockState(m.set(x + dx, y - 1, z + dz)).isFaceSturdy(level, m, net.minecraft.core.Direction.UP)) return false;
+                for (int dy = 0; dy < height; dy++) {
+                    BlockState st = level.getBlockState(m.set(x + dx, y + dy, z + dz));
+                    if (!st.getCollisionShape(level, m).isEmpty() || !st.getFluidState().isEmpty()) return false;
+                }
+            }
+        }
         return true;
     }
 
@@ -935,16 +1021,19 @@ public final class Expedition {
         return m;
     }
 
-    /** 5.11: the last wave's captain - a Wither Knight (Fortress) or Brute Warlord (Bastion). */
+    /**
+     * 5.11: the last wave's captain - a Wither Knight (Fortress) or Brute Warlord (Bastion).
+     * 5.12: it appears on a spot where it fits (3 x 3 wide, 4 tall) near a doorway, and says so in the log.
+     */
     private static void captain(ServerLevel level, Run run, ExpeditionRooms.Room r) {
         int d = run.diff;
         EntityType<? extends Mob> type = run.fortress ? net.minecraft.world.entity.EntityTypes.WITHER_SKELETON : net.minecraft.world.entity.EntityTypes.PIGLIN_BRUTE;
-        // 5.12: by a doorway, but on a clear spot (a 1.3x brute doesn't fit everywhere).
+        String plain = run.fortress ? "Wither Knight" : "Brute Warlord";
         BlockPos door = r.doorsIn.isEmpty() ? r.floorCenter() : r.doorsIn.get(RNG.nextInt(r.doorsIn.size()));
         BlockPos spot = bigSpot(level, r, door, 1, 4);
         Mob m = spawnGuard(level, run, r, type, false, spot);
         if (m == null) {
-            Skyserver.LOGGER.warn("[Expedition] the {} could not be created", run.fortress ? "Wither Knight" : "Brute Warlord");
+            Skyserver.LOGGER.warn("[Expedition] the {} could not be created at {} {} {}", plain, spot.getX(), spot.getY(), spot.getZ());
             return;
         }
         gear(level, run, m, false);
@@ -963,8 +1052,7 @@ public final class Expedition {
         m.setCustomName(Component.literal(nm));
         m.setCustomNameVisible(true);
         m.setGlowingTag(true);
-        Skyserver.LOGGER.info("[Expedition] {} spawned at {} {} {} ({} HP)", run.fortress ? "Wither Knight" : "Brute Warlord",
-                spot.getX(), spot.getY(), spot.getZ(), Math.round(m.getMaxHealth()));
+        Skyserver.LOGGER.info("[Expedition] {} spawned at {} {} {} ({} HP)", plain, spot.getX(), spot.getY(), spot.getZ(), Math.round(m.getMaxHealth()));
         level.playSound(null, m.blockPosition(), SoundEvents.ENDER_DRAGON_GROWL, SoundSource.HOSTILE, 1.2f, 1.4f);
         for (ServerPlayer p : inside(run))
             if (r.inside(p.getX(), p.getY(), p.getZ(), 1)) Announce.title(p, nm, "§7leads the last wave!", 5, 40, 10);
@@ -980,7 +1068,7 @@ public final class Expedition {
         r.waveSizes = new int[r.waves];
         for (int w = 0; w < r.waves; w++) r.waveSizes[w] = base[w] + extra;
         r.wave = 0;
-        int tw = RNG.nextInt(3);
+        int tw = RNG.nextInt(TWIST_NAMES.length); // 5.14: Ambush or Withering
         TWIST.put(r, tw);
         for (ServerPlayer m : inside(run))
             if (r.inside(m.getX(), m.getY(), m.getZ(), 1)) Lobby.msg(m, TWIST_NAMES[tw] + " arena! " + TWIST_TIPS[tw] + "§7.");
@@ -1010,11 +1098,6 @@ public final class Expedition {
                 floor = door.offset(RNG.nextInt(3) - 1, 0, RNG.nextInt(3) - 1);
             }
             spawnFighter(level, run, r, type, isRanged(type, i), floor);
-        }
-        // Blazing arenas: one more fire mob every wave.
-        if (tw == BLAZING) {
-            if (run.fortress) spawnFighter(level, run, r, net.minecraft.world.entity.EntityTypes.BLAZE, true, roomSpot(level, r));
-            else spawnFighter(level, run, r, net.minecraft.world.entity.EntityTypes.MAGMA_CUBE, false, roomSpot(level, r));
         }
         if (last) captain(level, run, r);
         else WAVE_DUE.put(r, ticks + (WAVE_SECONDS[run.diff] - (tw == AMBUSH ? 5 : 0)) * 20L);
@@ -1102,11 +1185,10 @@ public final class Expedition {
         if (run.bossSpawned || run.over) return;
         run.bossSpawned = true;
         ExpeditionRooms.Room arena = run.layout.arena;
-        // 5.12: a clear spot near the middle (the 2.3-2.4x hidden body needs room, away from pillars and cover).
-        BlockPos at = bigSpot(level, arena, arena.floorCenter(), 2, 6);
-        Mob body = spawnGuard(level, run, arena, ExpeditionBoss.hitboxType(run.fortress), true, at);
+        // 5.12: on a spot where the big body fits (5 x 5 wide, 6 tall) near the middle; if it can't be made, try again.
+        Mob body = spawnGuard(level, run, arena, ExpeditionBoss.hitboxType(run.fortress), true, bigSpot(level, arena, arena.floorCenter(), 2, 6));
         if (body == null) {
-            Skyserver.LOGGER.warn("[Expedition] the {} could not be created - trying again in a moment", ExpeditionBoss.name(run.fortress));
+            Skyserver.LOGGER.warn("[Expedition] the boss could not be created - trying again");
             run.bossSpawned = false;
             return;
         }
@@ -1115,7 +1197,8 @@ public final class Expedition {
             @Override
             public List<ServerPlayer> fighters() {
                 List<ServerPlayer> out = new ArrayList<>();
-                for (ServerPlayer p : inside(run)) if (isExpedition(p.level()) && arena.inside(p.getX(), p.getY(), p.getZ(), 1)) out.add(p);
+                for (ServerPlayer p : inside(run))
+                    if (isExpedition(p.level()) && !DOWNED.containsKey(p.getUUID()) && arena.inside(p.getX(), p.getY(), p.getZ(), 1)) out.add(p);
                 return out;
             }
 
@@ -1159,10 +1242,10 @@ public final class Expedition {
         if (taken <= 0) return;
         if (entity instanceof ServerPlayer p) {
             LAST_HURT.put(p.getUUID(), ticks);
-            // Withering arenas: every guard hit withers you.
+            // Withering arenas: a guard's hit withers you half the time (5.15: was every hit).
             if (attacker != null) {
                 Object[] g = GUARD_OF.get(attacker.getUUID());
-                if (g != null && g[1] instanceof ExpeditionRooms.Room room && twist(room) == WITHERING)
+                if (g != null && g[1] instanceof ExpeditionRooms.Room room && twist(room) == WITHERING && RNG.nextInt(100) < WITHER_CHANCE)
                     p.addEffect(new MobEffectInstance(MobEffects.WITHER, 80, ((Run) g[0]).diff >= 2 ? 1 : 0));
             }
             return;
@@ -1270,6 +1353,10 @@ public final class Expedition {
             Lobby.msg(p, "§7You're not on an expedition.");
             return;
         }
+        if (DOWNED.containsKey(p.getUUID())) {
+            Lobby.msg(p, "§cYou're down! §7Revive or give up first (the buttons in chat).");
+            return;
+        }
         if (run.layout != null && !run.layout.spawn.inside(p.getX(), p.getY(), p.getZ(), 0.5)) {
             Lobby.msg(p, "§cGo back to §6Wren's Landing §cfirst - Captain Wren takes you home from there §7("
                     + (int) Math.sqrt(p.distanceToSqr(run.landing.getX(), run.landing.getY(), run.landing.getZ())) + " blocks away).");
@@ -1280,6 +1367,8 @@ public final class Expedition {
 
     /** Home safely with everything carried: onto the deck (or the island home if the ship is gone). */
     static void extract(ServerPlayer p, Run run, String msg) {
+        DOWNED.remove(p.getUUID());
+        PROTECTED.remove(p.getUUID());
         run.inside.remove(p.getUUID());
         HEALTH_LOCK.remove(p.getUUID());
         IN_FIGHT.remove(p.getUUID());
@@ -1303,6 +1392,8 @@ public final class Expedition {
 
     /** Dying (or quitting mid-fight): everything carried drops where they are, then home to the island. */
     static void died(ServerPlayer p, String why) {
+        DOWNED.remove(p.getUUID());
+        PROTECTED.remove(p.getUUID());
         Run run = PLAYER_RUN.remove(p.getUUID());
         HEALTH_LOCK.remove(p.getUUID());
         IN_FIGHT.remove(p.getUUID());
@@ -1326,6 +1417,110 @@ public final class Expedition {
             Lobby.msg(p, "§c§lYou " + why + " in the Nether §7and lost everything you were carrying. §8(Your ender chest is safe.)");
         });
         if (run != null && run.inside.isEmpty()) endRun(run, "nobody is left");
+    }
+
+    // ---- 5.15: the one-time revive ----
+
+    /** What a revive costs on this trip: REVIVE_SHARE of the difficulty's price (lower during Wren's Bounty, like the price). */
+    static long reviveCost(Run run) {
+        return Math.round(PRICES[run.diff] * REVIVE_SHARE);
+    }
+
+    /**
+     * Called when a player would die. If they still have their revive and can afford it, they go DOWN (can't move
+     * or be hurt, guards ignore them) and get REVIVE_SECONDS to choose. Returns false if there's no offer (= they die).
+     */
+    private static boolean offerRevive(ServerPlayer p) {
+        UUID id = p.getUUID();
+        Run run = PLAYER_RUN.get(id);
+        if (run == null || run.over || run.revived.contains(id)) return false;
+        long cost = reviveCost(run);
+        if (Economy.balance(server, id) < cost) {
+            Lobby.msg(p, "§7(A revive costs " + Economy.format(cost) + " - you didn't have enough.)");
+            return false;
+        }
+        DOWNED.put(id, new Downed(run, ticks + REVIVE_SECONDS * 20L, p.getX(), p.getZ()));
+        p.setHealth(1f);
+        p.clearFire();
+        p.setDeltaMovement(0, 0, 0);
+        p.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, REVIVE_SECONDS * 20, 9, false, false));
+        p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.WITHER_SPAWN, SoundSource.PLAYERS, 0.6f, 1.6f);
+        Announce.title(p, "§c§lYOU'RE DOWN", "§7Revive for §6" + Economy.format(cost) + "§7? Click in chat (" + REVIVE_SECONDS + "s)", 5, 80, 10);
+        p.sendSystemMessage(Component.literal("§c§lYou're down! §7Once per trip you can revive: full health, right here, nothing lost. ")
+                .append(button("§a§l[Revive for " + Economy.format(cost) + "]", "/expedition revive", "Pay " + Economy.format(cost) + " and get back up"))
+                .append(Component.literal(" "))
+                .append(button("§c§l[Give up]", "/expedition giveup", "Die: drop everything you carry and go home")));
+        Lobby.msg(p, "§7You have §f" + REVIVE_SECONDS + " seconds§7. Nothing can hurt you while you choose. No answer = you die.");
+        for (ServerPlayer m : inside(run)) if (m != p) Lobby.msg(m, "§c" + p.getName().getString() + " is down! §7They have " + REVIVE_SECONDS + " seconds to revive.");
+        return true;
+    }
+
+    /** /expedition revive (the chat button): pay and get back up. */
+    static void revive(ServerPlayer p) {
+        UUID id = p.getUUID();
+        Downed d = DOWNED.get(id);
+        if (d == null) {
+            Lobby.msg(p, "§7You're not down.");
+            return;
+        }
+        long cost = reviveCost(d.run());
+        if (!Economy.take(server, id, cost)) {
+            Lobby.msg(p, "§cYou don't have " + Economy.format(cost) + " for the revive.");
+            died(p, "died");
+            return;
+        }
+        DOWNED.remove(id);
+        d.run().revived.add(id);
+        HEALTH_LOCK.remove(id); // full health means full health, even if they fell outside a fight
+        p.removeEffect(MobEffects.SLOWNESS);
+        p.removeEffect(MobEffects.WITHER);
+        p.clearFire();
+        p.setHealth(p.getMaxHealth());
+        p.getFoodData().setFoodLevel(20);
+        p.resetFallDistance();
+        PROTECTED.put(id, ticks + REVIVE_PROTECT_TICKS);
+        ServerLevel nl = level();
+        // Fell into lava: coming back there would just kill them again, so Wren's Landing it is.
+        if (p.isInLava() && nl != null && d.run().landing != null) {
+            BlockPos l = d.run().landing;
+            p.teleportTo(nl, l.getX() + 0.5, l.getY(), l.getZ() + 0.5, Set.of(), p.getYRot(), 0f, true);
+            Lobby.msg(p, "§6[Captain Wren] §fFished you out of the lava, captain! Back on your feet.");
+        }
+        p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.TOTEM_USE, SoundSource.PLAYERS, 1f, 1f);
+        ((ServerLevel) p.level()).sendParticles(ParticleTypes.TOTEM_OF_UNDYING, p.getX(), p.getY() + 1, p.getZ(), 40, 0.5, 0.8, 0.5, 0.3);
+        Announce.title(p, "§a§lREVIVED!", "§7Nothing can hurt you for " + (REVIVE_PROTECT_TICKS / 20) + " seconds", 5, 40, 10);
+        Lobby.msg(p, "§a§lRevived! §7-" + Economy.format(cost) + ". That was your one revive for this trip.");
+        for (ServerPlayer m : inside(d.run())) if (m != p) Lobby.msg(m, "§a" + p.getName().getString() + " is back up!");
+    }
+
+    /** /expedition giveup (the chat button): die now instead of waiting. */
+    static void giveUp(ServerPlayer p) {
+        if (DOWNED.remove(p.getUUID()) == null) {
+            Lobby.msg(p, "§7You're not down.");
+            return;
+        }
+        died(p, "died");
+    }
+
+    /** Every tick: downed players stay where they fell (they may still drop if they were in the air); time up = death. */
+    private static void tickDowned() {
+        for (Map.Entry<UUID, Downed> e : new ArrayList<>(DOWNED.entrySet())) {
+            ServerPlayer p = server.getPlayerList().getPlayer(e.getKey());
+            if (p == null) {
+                DOWNED.remove(e.getKey());
+                continue;
+            }
+            Downed d = e.getValue();
+            if (ticks >= d.deadline() || !isExpedition(p.level())) {
+                DOWNED.remove(e.getKey());
+                if (isExpedition(p.level())) died(p, "died");
+                continue;
+            }
+            p.clearFire();
+            if (Math.abs(p.getX() - d.x()) > 0.3 || Math.abs(p.getZ() - d.z()) > 0.3) p.teleportTo(d.x(), p.getY(), d.z());
+            if (ticks % 20 == 0)
+                Announce.actionBar(p, "§c§lDOWN §7- revive or give up in chat §f" + Math.max(0, (d.deadline() - ticks) / 20) + "s");
+        }
     }
 
     private static void dropAll(ServerPlayer p, ServerLevel level) {
@@ -1355,7 +1550,9 @@ public final class Expedition {
         Run run = PLAYER_RUN.get(p.getUUID());
         if (run == null || !isExpedition(p.level())) return;
         Long hurt = LAST_HURT.get(p.getUUID());
-        if (hurt != null && ticks - hurt <= COMBAT_LOG_SECONDS * 20L) {
+        boolean wasDown = DOWNED.remove(p.getUUID()) != null; // 5.15: quitting while down is dying
+        PROTECTED.remove(p.getUUID());
+        if (wasDown || (hurt != null && ticks - hurt <= COMBAT_LOG_SECONDS * 20L)) {
             dropAll(p, (ServerLevel) p.level());
             for (ServerPlayer m : inside(run)) if (m != p) Lobby.msg(m, "§c" + p.getName().getString() + " quit in the middle of a fight - their things are where they were.");
         }
@@ -1371,6 +1568,12 @@ public final class Expedition {
         if (run.over) return;
         run.over = true;
         RUNS.remove(run.islandId);
+        // 5.15: anyone still down when the trip ends didn't revive in time.
+        for (UUID id : new ArrayList<>(run.inside)) {
+            if (DOWNED.remove(id) == null) continue;
+            ServerPlayer dp = server.getPlayerList().getPlayer(id);
+            if (dp != null) died(dp, "died");
+        }
         if (run.fight != null) run.fight.end();
         if (run.layout != null && run.layout.builder != null) run.layout.builder.release();
         if (run.layout != null) {
@@ -1431,6 +1634,7 @@ public final class Expedition {
     /** Every tick: building maps, the boss fights, and the health lock. */
     private static void fastTick() {
         if (server == null) return;
+        if (!DOWNED.isEmpty()) tickDowned();
         for (Run run : new ArrayList<>(RUNS.values())) {
             if (run.over) continue;
             if (run.building) {
@@ -1510,7 +1714,7 @@ public final class Expedition {
 
     private static void tickRun(Run run) {
         if (run.building) return; // fastTick handles the flight
-        long left = TIME_LIMIT_SECONDS - (ticks - run.startTick) / 20;
+        long left = TIME_LIMITS[run.diff] - (ticks - run.startTick) / 20;
         if (left <= 0) {
             endRun(run, "time ran out");
             return;
@@ -1523,8 +1727,10 @@ public final class Expedition {
         if (nl == null || run.layout == null) return;
         ExpeditionRooms.Layout lay = run.layout;
         // 5.10: only our guards live on the map - anything else that turns up goes.
+        // 5.14: strays are normally removed as they appear (ENTITY_LOAD); this sweep is the safety net, and logs too.
         for (Mob mob : nl.getEntitiesOfClass(Mob.class, new AABB(run.cx - run.half, ExpeditionRooms.SEA_Y - 10, run.cz - run.half,
-                run.cx + run.half, 200, run.cz + run.half), m -> !GUARD_OF.containsKey(m.getUUID()) && !m.entityTags().contains(NETHER_WREN_TAG))) mob.discard();
+                run.cx + run.half, 200, run.cz + run.half), m -> !GUARD_OF.containsKey(m.getUUID()) && !m.entityTags().contains(NETHER_WREN_TAG)))
+            removeStray(mob, mob.entityTags().contains(GUARD_TAG) ? "an old guard nobody owns, found by the sweep" : "found by the sweep");
         // Guards can't get into Wren's Landing either.
         ExpeditionRooms.Room sp = lay.spawn;
         for (Mob mob : nl.getEntitiesOfClass(Mob.class, new AABB(sp.x0 - 1, sp.y0 - 1, sp.z0 - 1, sp.x1 + 2, sp.y1 + 2, sp.z1 + 2),
@@ -1539,12 +1745,11 @@ public final class Expedition {
             Long due = WAVE_DUE.get(r);
             if (due != null && ticks >= due) nextWave(nl, run, r);
         }
-        // 5.12: the boss vanished without dying (removed, unloaded...): clear it so it comes back.
+        // 5.12 watchdog: the boss fight ended without the boss being killed (its body vanished) - start it over.
         if (run.bossSpawned && !run.bossDead && run.fight != null && run.fight.over) {
-            Entity stray = run.boss == null ? null : nl.getEntity(run.boss);
-            Skyserver.LOGGER.warn("[Expedition] the {} disappeared without being killed (entity {}) - it will appear again",
-                    ExpeditionBoss.name(run.fortress), stray == null ? "gone" : stray.isAlive() ? "still there" : "dead");
-            if (stray != null) stray.discard();
+            Skyserver.LOGGER.warn("[Expedition] the boss disappeared without being killed - it will come back");
+            Entity leftover = run.boss != null ? nl.getEntity(run.boss) : null;
+            if (leftover != null) leftover.discard();
             if (run.boss != null) GUARD_OF.remove(run.boss);
             run.boss = null;
             run.fight = null;
@@ -1552,14 +1757,10 @@ public final class Expedition {
         }
         // Rooms wake when someone walks in; the arena once it's open.
         List<ServerPlayer> players = inside(run);
-        boolean burn = (ticks / 20) % 4 == 0;
         for (ServerPlayer p : players) {
             if (!isExpedition(p.level())) continue;
             for (ExpeditionRooms.Room r : lay.rooms) {
                 if (!r.woke && r.inside(p.getX(), p.getY(), p.getZ(), 0)) wakeRoom(nl, run, r);
-                // 5.11: Blazing arenas set you alight now and then (fire resistance stops it).
-                if (burn && r.active() && twist(r) == BLAZING && r.inside(p.getX(), p.getY(), p.getZ(), 0.5) && !p.hasEffect(MobEffects.FIRE_RESISTANCE))
-                    p.setRemainingFireTicks(Math.max(p.getRemainingFireTicks(), 50));
             }
             if (lay.arena.inside(p.getX(), p.getY(), p.getZ(), 0)) {
                 if (run.arenaOpen && !run.bossSpawned) spawnBoss(nl, run);
@@ -1572,13 +1773,6 @@ public final class Expedition {
                 nl.playSound(null, sec.chest, SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.PLAYERS, 1f, 1.4f);
                 for (ServerPlayer m : inside(run)) Lobby.msg(m, "§d§l✦ SECRET FOUND! §7" + p.getName().getString() + " found a hidden alcove with a little chest.");
             }
-        }
-        // Blazing arenas smoulder while their fight is on.
-        for (ExpeditionRooms.Room r : lay.rooms) {
-            if (!r.active() || twist(r) != BLAZING) continue;
-            Vec3 c = r.center();
-            nl.sendParticles(ParticleTypes.FLAME, c.x, c.y + 0.2, c.z, 40, 14, 0.1, 14, 0.01);
-            nl.sendParticles(ParticleTypes.LAVA, c.x, c.y + 0.2, c.z, 6, 14, 0.1, 14, 0.0);
         }
         leashGuards(nl, run);
         // Status line and staying inside the area.
@@ -1593,6 +1787,7 @@ public final class Expedition {
                 p.teleportTo(nl, run.landing.getX() + 0.5, run.landing.getY(), run.landing.getZ() + 0.5, Set.of(), p.getYRot(), 0f, true);
                 Lobby.msg(p, "§7Wren: §f\"Too far, captain! Stay near the structure.\"");
             }
+            if (DOWNED.containsKey(p.getUUID())) continue; // 5.15: the revive countdown is showing
             Long lastTip = LAST_TIP.get(p.getUUID());
             if (lastTip != null && ticks - lastTip < 40) continue; // a tip is showing
             p.connection.send(new ClientboundSetActionBarTextPacket(Component.literal(statusLine(run, p, boss, left))));
@@ -1720,7 +1915,7 @@ public final class Expedition {
         double bd = Double.MAX_VALUE;
         Vec3 c = room.center();
         for (ServerPlayer p : inside(run)) {
-            if (!isExpedition(p.level()) || !room.inside(p.getX(), p.getY(), p.getZ(), 1)) continue;
+            if (!isExpedition(p.level()) || DOWNED.containsKey(p.getUUID()) || !room.inside(p.getX(), p.getY(), p.getZ(), 1)) continue; // 5.15: guards ignore the downed
             double d = p.position().distanceToSqr(c);
             if (d < bd) {
                 bd = d;

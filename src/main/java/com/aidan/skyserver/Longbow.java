@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.Holder;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.Registries;
@@ -44,6 +45,9 @@ import java.util.*;
  *
  * It's a normal bow with Infinity plus a hidden marker in its lore, which players can't add
  * in survival, so renaming a bow in an anvil won't fake one. Admins get one with /longbow.
+ *
+ * 5.14: the Legendary crate gives Longbows, so create(MinecraftServer) builds one without a player.
+ * Longbow.init() also starts the Fire Wand (FireWand.init()), the other new Legendary crate prize.
  */
 public final class Longbow {
     public static final String NAME = "Longbow";
@@ -95,6 +99,7 @@ public final class Longbow {
         if (initialized) return;
         initialized = true;
         Skyserver.LOGGER.info("Longbow loaded");
+        FireWand.init(); // 5.14: the Legendary crate's Fire Wand (no change to Skyserver.java needed)
         ServerTickEvents.END_SERVER_TICK.register(s -> Safe.run("longbow", () -> tick(s)));
 
         // Catch the Longbow's arrow the moment it's fired.
@@ -121,9 +126,18 @@ public final class Longbow {
     // =====================================================================
 
     public static ItemStack create(ServerPlayer p) {
+        return create(p.registryAccess());
+    }
+
+    /** 5.14: a Longbow built from the server (crate prizes are made without a player). */
+    public static ItemStack create(MinecraftServer server) {
+        return create(server.registryAccess());
+    }
+
+    private static ItemStack create(RegistryAccess access) {
         ItemStack bow = new ItemStack(Items.BOW);
-        enchant(p, bow, Enchantments.INFINITY, 1);
-        enchant(p, bow, Enchantments.UNBREAKING, 3);
+        enchant(access, bow, Enchantments.INFINITY, 1);
+        enchant(access, bow, Enchantments.UNBREAKING, 3);
         bow.set(DataComponents.CUSTOM_NAME, Component.literal("§b" + NAME));
         bow.set(DataComponents.LORE, new ItemLore(List.of(
                 Component.literal("§7Hold 3.5s for a full-charge beam"),
@@ -156,8 +170,8 @@ public final class Longbow {
         return "§c" + ((ready - ticks + 19) / 20) + "s";
     }
 
-    private static void enchant(ServerPlayer p, ItemStack stack, ResourceKey<Enchantment> key, int level) {
-        Holder<Enchantment> holder = p.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(key);
+    private static void enchant(RegistryAccess access, ItemStack stack, ResourceKey<Enchantment> key, int level) {
+        Holder<Enchantment> holder = access.lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(key);
         stack.enchant(holder, level);
     }
 

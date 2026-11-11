@@ -16,6 +16,12 @@ import java.util.*;
  *
  * Every event also goes to the battle pass (weekly challenges use the same event names), and each
  * finished daily quest gives pass XP.
+ *
+ * 5.13: every event also goes to Wren's Weekly Voyage (stamps, the board, Gold Rush), and the
+ * sw_play / gw_play events are counted in PlayerStats and Playtime (/ss usage). The Archery and
+ * Spleef quests were taken out of the pool (those modes went off the compass).
+ *
+ * 5.16: the Spleef quest is back (the pit is on the compass again). Archery stays out.
  */
 public final class Quests {
     public record Quest(String key, String text, int target, long money, int xp) {}
@@ -34,14 +40,13 @@ public final class Quests {
             new Quest("parkour", "Finish any obstacle course", 1, 250, 60),
             new Quest("crate", "Open a mystery chest", 1, 150, 40),
             new Quest("fish", "Catch 5 fish at the lobby pond", 5, 200, 50),
-            new Quest("archery", "Score 60 points at the archery range", 60, 250, 60),
             new Quest("duel", "Win a duel", 1, 300, 70),
-            new Quest("spleef", "Win a round in the Spleef pit", 1, 300, 70),
             new Quest("maze", "Find your way through the hedge maze", 1, 200, 50),
-            new Quest("elytra", "Finish the elytra ring course", 1, 250, 60),
+            new Quest("elytra", "Finish an elytra ring course", 1, 250, 60),
             new Quest("island_place", "Place 100 blocks on your Sky Island", 100, 250, 60),
             new Quest("island_break", "Mine 200 blocks on your Sky Island", 200, 250, 60),
-            new Quest("challenge", "Complete an island challenge", 1, 300, 70));
+            new Quest("challenge", "Complete an island challenge", 1, 300, 70),
+            new Quest("spleef", "Win a round in the Spleef & TNT Run pit", 1, 250, 60)); // 5.16: back
     public static final int PER_DAY = 3;
 
     private static final Map<UUID, JsonObject> DATA = new HashMap<>();
@@ -97,6 +102,10 @@ public final class Quests {
         com.aidan.skyserver.Safe.run("pass event", () -> BattlePass.event(p, key, amount));
         if (key.equals("sw_win") || key.equals("gw_win") || key.equals("bw_win"))
             com.aidan.skyserver.Safe.run("victory effect", () -> Cosmetics.victory(p)); // 5.8
+        // 5.13: play counters (bw_play is already counted by BedwarsGame) and the Voyage.
+        if (key.equals("sw_play") || key.equals("gw_play")) PlayerStats.add(p, key, amount);
+        if (key.equals("sw_play") || key.equals("gw_play") || key.equals("bw_play")) Playtime.game(key.substring(0, 2));
+        com.aidan.skyserver.Safe.run("voyage event", () -> Voyage.onQuest(p, key, amount));
         Quest q = null;
         for (Quest t : today(p.getUUID())) if (t.key().equals(key)) q = t;
         if (q == null) return;

@@ -15,7 +15,8 @@ import java.util.List;
  *  row 1: Skywars, Gold Wars, Bedwars, Sky Island, the Great Hall (mystery chests)
  *  row 2: your level, daily quests, your keys, the guide
  *  row 3: the four obstacle courses (5.8: boosters and daily streak in between)
- *  row 4: lobby activities (Spleef, Duels, Archery, Maze, Elytra Rings, Fishing)
+ *  row 4: Spleef / TNT Run pit (5.16: back), Duels, Wren's Weekly Voyage (5.13), Maze, Elytra Rings, Fishing
+ *         (5.13 removed the Spleef and Archery buttons; Archery is still off the compass - the range is still there)
  *  row 5: the key shop, the Shard Shop and the Cosmetic Shop (5.8)
  * 5.12: screens opened from here (Shard Shop, Cosmetic Shop, Elytra courses) get a ◀ Back arrow.
  */
@@ -25,7 +26,7 @@ public final class GameMenu extends LockedMenu {
     private static final int[] COURSE_SLOTS = {28, 30, 32, 34};
     private static final String[] COURSE_IDS = {"easy", "medium", "hard", "extreme"};
     private static final int BOOSTERS = 29, STREAK = 31;
-    private static final int SPLEEF = 37, DUELS = 38, ARCHERY = 39, MAZE = 40, ELYTRA = 41, FISHING = 42, SURVIVAL = 43;
+    private static final int SPLEEF = 37, DUELS = 38, VOYAGE = 39, MAZE = 40, ELYTRA = 41, FISHING = 42, SURVIVAL = 43;
     private static final int SHOP_FIRST = 46; // 46..50 = common..legendary key shop
     private static final int SHARDS = 51, CSHOP = 52;
 
@@ -53,11 +54,11 @@ public final class GameMenu extends LockedMenu {
                 "§7One Bedwars match runs at a time.", Lobby.gameStatus("bedwars"), "§eClick to join"));
         box.setItem(ISLAND, Stacks.named(new ItemStack(Items.GRASS_BLOCK), "§a§lSky Island", "§7Your own island: build, farm,", "§7upgrade and grow it.",
                 "§cNether Expeditions §7start there too.", "§eClick to go §7(or type /is)"));
-        box.setItem(HALL, Stacks.named(new ItemStack(Items.CHEST), "§d§lMystery Chests", "§7In the Great Hall of the castle.", "§eClick to go there"));
+        box.setItem(HALL, Stacks.named(new ItemStack(Items.CHEST), "§d§lMystery Chests", "§7In the Great Hall of the castle.",
+                "§7Left-click a chest to see every prize and its chance.", "§eClick to go there"));
 
-        // Level and rewards.
+        // Level and rewards. (5.13: the old "Season X - N days left" line is gone; the battle pass shows its own season.)
         List<String> lore = new ArrayList<>();
-        lore.add("§7Season " + Levels.season() + " §8- §7" + Levels.daysLeft() + " days left");
         int[] lv = Levels.levelOf(Levels.totalXp(viewer.getUUID()));
         lore.add("§eLevel §f" + lv[0] + " §7(" + lv[1] + "/" + lv[2] + " XP)");
         lore.add(Levels.progressBar(viewer.getUUID()));
@@ -124,9 +125,11 @@ public final class GameMenu extends LockedMenu {
         box.setItem(STREAK, Stacks.named(new ItemStack(Items.CLOCK), "§6§lDaily Streak", st.toArray(new String[0])));
 
         // Activities.
-        box.setItem(SPLEEF, Stacks.named(new ItemStack(Items.SNOW_BLOCK), "§f§lSpleef Pit", "§7Spleef and TNT Run rounds.", "§7Last one standing wins §6" + Economy.format(Activities.SPLEEF_WIN_MONEY) + "§7.", "§eClick to join the queue"));
+        // 5.16: the Spleef / TNT Run pit is back on the compass.
+        box.setItem(SPLEEF, Stacks.named(new ItemStack(Items.SNOW_BLOCK), "§f§lSpleef & TNT Run Pit", "§7Break the floor under the others,", "§7or outrun the falling floor.",
+                "§7Last one standing wins the round.", "§7Bots fill the pit if you're alone.", "§eClick to join the queue §7(/spleef)"));
         box.setItem(DUELS, Stacks.named(new ItemStack(Items.IRON_SWORD), "§c§lDuel Arena", "§7Challenge someone: §e/duel <name> [bet]", "§7The winner takes the whole bet.", "§eClick to go there"));
-        box.setItem(ARCHERY, Stacks.named(new ItemStack(Items.BOW), "§6§lArchery Range", "§760-second rounds.", "§7Score " + Activities.ARCHERY_REWARD_SCORE + "+ for §6" + Economy.format(Activities.ARCHERY_MONEY) + " §7(daily).", "§eClick to go there"));
+        box.setItem(VOYAGE, Voyage.compassIcon(viewer)); // 5.13: Wren's Weekly Voyage
         box.setItem(MAZE, Stacks.named(new ItemStack(Items.OAK_LEAVES), "§2§lHedge Maze", "§7Find the fountain in the middle.", "§7Daily reward §6" + Economy.format(Activities.MAZE_MONEY) + "§7.", "§eClick to go there"));
         box.setItem(ELYTRA, Stacks.named(new ItemStack(Items.ELYTRA), "§d§lElytra Rings", "§7Fly through every ring, land on the pad.", "§7Daily reward §6" + Economy.format(Activities.ELYTRA_MONEY) + "§7.", "§eClick to pick a course"));
         box.setItem(FISHING, Stacks.named(new ItemStack(Items.FISHING_ROD), "§b§lFishing Pond", "§7Every catch pays a little.", "§7Any catch can be a key!", "§eClick to go there"));
@@ -137,7 +140,8 @@ public final class GameMenu extends LockedMenu {
         long bal = Economy.balance(viewer.level().getServer(), viewer.getUUID());
         for (int t = 0; t < 5; t++) {
             box.setItem(SHOP_FIRST + t, Stacks.named(new ItemStack(Items.TRIPWIRE_HOOK), "§fBuy a " + Keys.COLORS[t] + Keys.NAMES[t] + " Key",
-                    "§7Price: §6" + Economy.format(Keys.PRICES[t]), bal >= 0 ? "§7Your money: §6" + Economy.format(bal) : "", "§eClick to buy"));
+                    "§7Price: §6" + Economy.format(Keys.PRICES[t]), bal >= 0 ? "§7Your money: §6" + Economy.format(bal) : "",
+                    "§7Left-click a chest in the Great Hall", "§7to see every prize and its chance.", "§eClick to buy"));
         }
         box.setItem(SHARDS, Stacks.named(new ItemStack(Items.AMETHYST_SHARD), "§d§lShard Shop", "§7Your Key Shards: §f" + Tokens.shards(viewer.getUUID()),
                 "§7Trade shards for the key, cosmetic", "§7or booster you want.", "§eClick to open"));
@@ -183,12 +187,12 @@ public final class GameMenu extends LockedMenu {
             case BOOSTERS -> Lobby.later(viewer, () -> Boosters.show(viewer));
             case SHARDS -> sub(() -> ShardShop.open(viewer)); // 5.12: with a Back arrow
             case CSHOP -> sub(() -> CosmeticShop.open(viewer)); // 5.12: with a Back arrow
-            case SPLEEF -> Lobby.later(viewer, () -> Activities.goTo(viewer, "spleef"));
+            case VOYAGE -> sub(() -> VoyageMenu.open(viewer)); // 5.13: with a Back arrow
+            case SPLEEF -> Lobby.later(viewer, () -> Activities.goTo(viewer, "spleef")); // 5.16: to the pit, into the queue
             case DUELS -> Lobby.later(viewer, () -> {
                 Activities.goTo(viewer, "duels");
                 Lobby.msg(viewer, "§cDuel Arena: §7type §e/duel <player> [bet] §7to challenge someone.");
             });
-            case ARCHERY -> Lobby.later(viewer, () -> Activities.goTo(viewer, "archery"));
             case MAZE -> Lobby.later(viewer, () -> Activities.goTo(viewer, "maze"));
             case ELYTRA -> sub(() -> Activities.goTo(viewer, "elytra")); // 5.12: the course picker gets a Back arrow
             case FISHING -> Lobby.later(viewer, () -> Activities.goTo(viewer, "pond"));

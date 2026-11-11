@@ -19,6 +19,7 @@ import java.util.List;
  *  - CallMenu (from /is): call the airship with the deposit or a ticket.
  *  - HelmMenu (right-click Wren on the deck): Fortress / Bastion / Surprise and the difficulty.
  *  - WarningMenu: "you lose everything you carry if you die" - confirm to set sail.
+ * 5.16: the buttons show the time limit and the one-time revive (and its price) from 5.15.
  */
 public final class ExpeditionMenu {
     private ExpeditionMenu() {}
@@ -49,6 +50,11 @@ public final class ExpeditionMenu {
         return b.toString();
     }
 
+    /** 5.16: what the one-time revive costs on this difficulty (the same sum Expedition.reviveCost uses). */
+    private static long reviveCost(int d) {
+        return Math.round(Expedition.PRICES[d] * Expedition.REVIVE_SHARE);
+    }
+
     /** The button in the /is menu. */
     public static ItemStack islandButton(ServerPlayer p) {
         Islands.Island is = Islands.islandOf(p.getUUID());
@@ -58,7 +64,7 @@ public final class ExpeditionMenu {
                 "§7Captain Wren flies your island crew", "§7to a Nether Fortress or Bastion.",
                 "§7Clear the guarded chest rooms, then", "§7beat the boss for the Treasure Vault.",
                 "§7Prices: §a" + k(Expedition.PRICES[0]) + " §e" + k(Expedition.PRICES[1]) + " §c" + k(Expedition.PRICES[2]) + " §4" + k(Expedition.PRICES[3]),
-                "§c§lDying loses everything you carry!", state);
+                "§c§lDying loses everything you carry!", "§7(Once per trip you can pay to revive.)", state);
     }
 
     public static void openSummon(ServerPlayer p) {
@@ -111,7 +117,8 @@ public final class ExpeditionMenu {
             }
             box.setItem(22, Stacks.named(new ItemStack(Items.SHIELD), "§fBefore you go",
                     "§7Wear your own armor, bring weapons,", "§7food, blocks and torches.",
-                    "§cIf you die you lose everything you carry.", "§7Your ender chest stays safe.", "§7Totems of Undying work."));
+                    "§cIf you die you lose everything you carry.", "§7Your ender chest stays safe.", "§7Totems of Undying work.",
+                    "§aOnce per trip you can pay 20% of the", "§atrip's price to revive and keep it all."));
             frame(Stacks.named(new ItemStack(Items.STAINED_GLASS_PANE.pick(DyeColor.RED)), " "));
             broadcastChanges();
         }
@@ -158,6 +165,9 @@ public final class ExpeditionMenu {
                 lore.add("§7Next wave every §f" + Expedition.WAVE_SECONDS[d] + "s§7, a §4captain §7leads the last");
                 lore.add(GUARD_GEAR[d]);
                 lore.add("§7Boss: §c" + Math.round(ExpeditionBoss.HP[d]) + "❤ §8(+" + Math.round(ExpeditionBoss.HP_PER_EXTRA_PLAYER * 100) + "% per extra crew)");
+                // 5.16: the time limit and the one-time revive.
+                lore.add("§7Time limit: §f" + (Expedition.TIME_LIMITS[d] / 60) + " minutes");
+                lore.add("§7One revive each per trip: §6" + Economy.format(reviveCost(d)));
                 lore.add("§7Vault: §6" + Economy.format(ExpeditionLoot.vaultMoneyTotal(d)) + " §7(shared) + " + Keys.COLORS[key] + Keys.NAMES[key] + " Key"
                         + (ExpeditionLoot.BONUS_KEY_CHANCE[d] > 0 ? " §7(+" + ExpeditionLoot.BONUS_KEY_CHANCE[d] + "% " + Keys.COLORS[ExpeditionLoot.BONUS_KEY_TIER[d]]
                         + Keys.NAMES[ExpeditionLoot.BONUS_KEY_TIER[d]] + "§7)" : ""));
@@ -206,8 +216,10 @@ public final class ExpeditionMenu {
             box.setItem(13, Stacks.named(new ItemStack(Items.BARRIER), "§c§lREAD THIS FIRST",
                     "§fIf you die in the Nether, you §c§llose", "§c§leverything you are carrying§f.",
                     "§7It drops where you die: your crew can", "§7pick it up before the trip ends.",
+                    "§aOnce per trip you can revive instead", "§afor §6" + Economy.format(reviveCost(diff)) + " §a(30 seconds to decide).",
                     "§7Your ender chest is safe. Totems work.", "§7Quitting during a fight counts as dying.",
-                    "§7Talk to Captain Wren in Wren's Landing", "§7to come home safe with your loot."));
+                    "§7Talk to Captain Wren in Wren's Landing", "§7to come home safe with your loot.",
+                    "§7Time limit: §f" + (Expedition.TIME_LIMITS[diff] / 60) + " minutes§7."));
             box.setItem(YES, Stacks.named(new ItemStack(Items.EMERALD_BLOCK), "§a§lI understand - set sail!",
                     Expedition.DIFF_COLORS[diff] + Expedition.DIFF_NAMES[diff] + " §7expedition",
                     owe > 0 ? "§7You pay §6" + Economy.format(owe) + " §7now" : "§7Already paid"));

@@ -11,6 +11,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.scores.TeamColor;
 
 import java.util.*;
 
@@ -19,6 +20,7 @@ import java.util.*;
  *  - Before your name (chat, tab list, name tag): "[MOD]" for moderators (5.9), then your level
  *    "[42]" (colour changes every 10 levels), or your prestige label ("[Cloudwalker]").
  *  - After your name: the title you picked in /cosmetics.
+ *  - 5.13: your name colour (CosmeticsPlus); the Legendary rainbow name changes colour every 2 seconds.
  *  - Trail: particles behind you while you walk in the lobby or on the islands, and behind your
  *    arrows in games.
  * Done with vanilla scoreboard teams named "ss...". In a game, the game's own team (Gold Wars /
@@ -27,6 +29,9 @@ import java.util.*;
 public final class Ranks {
     private static final Map<UUID, double[]> LAST_POS = new HashMap<>();
     public static final String MOD_TAG = "§b[MOD] ";
+    /** 5.13: the colours the rainbow name cycles through. */
+    private static final TeamColor[] RAINBOW = {TeamColor.RED, TeamColor.GOLD, TeamColor.YELLOW, TeamColor.GREEN,
+            TeamColor.AQUA, TeamColor.BLUE, TeamColor.LIGHT_PURPLE};
 
     private Ranks() {}
 
@@ -45,6 +50,24 @@ public final class Ranks {
 
     // ---- Name tags ----
 
+    /** 5.13: team colour for a name colour cosmetic (null = none / rainbow). */
+    private static TeamColor teamColor(String id) {
+        if (id == null) return null;
+        return switch (id) {
+            case "color_red" -> TeamColor.RED;
+            case "color_gold" -> TeamColor.GOLD;
+            case "color_yellow" -> TeamColor.YELLOW;
+            case "color_green" -> TeamColor.GREEN;
+            case "color_aqua" -> TeamColor.AQUA;
+            case "color_pink" -> TeamColor.LIGHT_PURPLE;
+            case "color_crimson" -> TeamColor.DARK_RED;
+            case "color_ocean" -> TeamColor.DARK_AQUA;
+            case "color_royal" -> TeamColor.DARK_PURPLE;
+            case "color_midnight" -> TeamColor.BLUE;
+            default -> null;
+        };
+    }
+
     private static void updateTeam(MinecraftServer s, ServerPlayer p) {
         Scoreboard sb = s.getScoreboard();
         String holder = p.getScoreboardName();
@@ -54,13 +77,22 @@ public final class Ranks {
         String title = prof == null ? null : prof.title;
         int pr = Levels.prestige(p.getUUID());
         boolean mod = Mods.isMod(p.getUUID());
-        String key = (mod ? "ssM" : "ss") + (pr > 0 ? "P" + Progression.labelIndex(pr) : "L" + Levels.level(p.getUUID())) + (title == null ? "" : "_" + Math.abs(title.hashCode() % 100000));
-        if (current != null && current.getName().equals(key)) return;
+        String color = CosmeticsPlus.color(p.getUUID());
+        boolean rainbow = "color_rainbow".equals(color);
+        String key = (mod ? "ssM" : "ss") + (pr > 0 ? "P" + Progression.labelIndex(pr) : "L" + Levels.level(p.getUUID()))
+                + (title == null ? "" : "_" + Math.abs(title.hashCode() % 100000))
+                + (color == null ? "" : rainbow ? "_r" + Math.abs(p.getUUID().hashCode() % 1000000) : "_" + color.substring(6));
+        if (current != null && current.getName().equals(key)) {
+            if (rainbow) current.setColor(Optional.of(RAINBOW[(int) ((s.getTickCount() / 40) % RAINBOW.length)]));
+            return;
+        }
         PlayerTeam team = sb.getPlayerTeam(key);
         if (team == null) {
             team = sb.addPlayerTeam(key);
             team.setPlayerPrefix(Component.literal((mod ? MOD_TAG : "") + Levels.chatTag(p.getUUID())));
             if (title != null) team.setPlayerSuffix(Component.literal(" " + Progression.cosmeticName(title)));
+            TeamColor c = rainbow ? RAINBOW[0] : teamColor(color);
+            if (c != null) team.setColor(Optional.of(c));
         }
         sb.addPlayerToTeam(holder, team);
     }
@@ -85,6 +117,7 @@ public final class Ranks {
             case "trail_spark" -> ParticleTypes.ELECTRIC_SPARK;
             case "trail_witch" -> ParticleTypes.WITCH;
             case "trail_totem" -> ParticleTypes.TOTEM_OF_UNDYING;
+            case "trail_voyage" -> ParticleTypes.FIREWORK; // 5.13: Voyage stamp book
             default -> null;
         };
     }

@@ -1,5 +1,7 @@
 package com.aidan.skyserver.lobby;
 
+import com.aidan.skyserver.FireWand;
+import com.aidan.skyserver.Longbow;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
@@ -28,6 +30,14 @@ import java.util.function.Function;
  * Cash value (money + /sell price of items + key shop value of keys) is about a third of the key's
  * shop price for Common-Rare and ~15% for Epic/Legendary, which lean on spawners, upgrade vouchers,
  * boosters, cosmetics and expedition tickets instead. Buying keys is meant to be a money sink.
+ *
+ * 5.14: the BEYOND-VANILLA enchantment books (Sharpness VI-VII, Protection V-VII, Power VI-VII, Punch and
+ * Knockback III-V; EnchantLevelMixin lets the anvil use them) are prizes here:
+ *   Epic      - the first and middle extra levels (Sharpness VI, Protection V + VI, Power VI, Punch III + IV,
+ *               Knockback III + IV), weight 2 each.
+ *   Legendary - the top levels (Sharpness VII, Protection VII, Power VII, Punch V, Knockback V), weight 3 each.
+ * The Legendary chest also gives the Longbow and the Fire Wand (weight 4 each; the Longbow comes with an arrow).
+ * Hard / Nightmare Expedition room chests give the same books at a flat 3% (ExpeditionLoot).
  * Change anything here and restart.
  */
 public final class Loot {
@@ -106,6 +116,11 @@ public final class Loot {
         };
     }
 
+    /** 5.14: a one-enchantment book prize. */
+    private static Prize bookPrize(int w, String label, ResourceKey<Enchantment> key, int level) {
+        return item(w, label, book(key, level));
+    }
+
     /** An 8-minute Fire Resistance potion (the Nether Expedition's best friend). */
     public static ItemStack fireRes() {
         ItemStack s = new ItemStack(Items.POTION);
@@ -155,7 +170,7 @@ public final class Loot {
                 token(6, "§9Rare cosmetic", "cosmetic:1", Items.NAME_TAG),
                 token(6, "§cEasy Nether Expedition Ticket", "ticket:0", Items.MAP),
                 keys(3, 3, 1), keys(5, 1, 2)));
-        // ---- Epic ($25,000) ----
+        // ---- Epic ($25,000) ---- (5.14: + the first and middle extra-level books)
         TABLES.add(List.of(
                 money(14, 10_000),
                 item(7, "Elytra + 64 Rockets", s -> new ItemStack(Items.ELYTRA)),
@@ -169,8 +184,16 @@ public final class Loot {
                 token(6, "§9Rare cosmetic", "cosmetic:1", Items.NAME_TAG),
                 token(5, "§cHard Nether Expedition Ticket", "ticket:2", Items.MAP),
                 token(5, "§660 min +50% Money Booster", "booster:money:60:50", Items.GOLD_INGOT),
+                bookPrize(2, "Sharpness VI Book", Enchantments.SHARPNESS, 6),
+                bookPrize(2, "Protection V Book", Enchantments.PROTECTION, 5),
+                bookPrize(2, "Protection VI Book", Enchantments.PROTECTION, 6),
+                bookPrize(2, "Power VI Book", Enchantments.POWER, 6),
+                bookPrize(2, "Punch III Book", Enchantments.PUNCH, 3),
+                bookPrize(2, "Punch IV Book", Enchantments.PUNCH, 4),
+                bookPrize(2, "Knockback III Book", Enchantments.KNOCKBACK, 3),
+                bookPrize(2, "Knockback IV Book", Enchantments.KNOCKBACK, 4),
                 keys(2, 4, 1), keys(5, 2, 2)));
-        // ---- Legendary ($60,000) ---- (the only chest with monster spawners)
+        // ---- Legendary ($60,000) ---- (the only chest with monster spawners; 5.14: + top-level books, Longbow, Fire Wand)
         TABLES.add(List.of(
                 money(12, 35_000),
                 item(8, "Netherite Pickaxe (Fortune III, Efficiency V, Unbreaking III)",
@@ -186,14 +209,22 @@ public final class Loot {
                 token(6, "§d§lServer Money Booster (+50%, 60 min)", "booster:server:60:50", Items.NETHER_STAR),
                 token(6, "§6Legendary cosmetic", "cosmetic:2", Items.NAME_TAG),
                 token(5, "§4Nightmare Nether Expedition Ticket", "ticket:3", Items.MAP),
+                item(4, "Longbow (3.5s full-charge beam)", Longbow::create),
+                item(4, "Fire Wand (fireball launcher)", s -> FireWand.create()),
+                bookPrize(3, "Sharpness VII Book", Enchantments.SHARPNESS, 7),
+                bookPrize(3, "Protection VII Book", Enchantments.PROTECTION, 7),
+                bookPrize(3, "Power VII Book", Enchantments.POWER, 7),
+                bookPrize(3, "Punch V Book", Enchantments.PUNCH, 5),
+                bookPrize(3, "Knockback V Book", Enchantments.KNOCKBACK, 5),
                 keys(4, 3, 2)));
     }
 
-    /** Extra items that come with a prize (rockets with the elytra, more potions). */
+    /** Extra items that come with a prize (rockets with the elytra, more potions, an arrow for the Longbow). */
     public static List<ItemStack> extras(Prize p) {
         if (p.label().startsWith("Elytra + 64")) return List.of(new ItemStack(Items.FIREWORK_ROCKET, 64));
         if (p.label().startsWith("2 Fire Resistance")) return List.of(fireRes());
         if (p.label().startsWith("3 Fire Resistance")) return List.of(fireRes(), fireRes());
+        if (p.label().startsWith("Longbow")) return List.of(new ItemStack(Items.ARROW));
         return List.of();
     }
 

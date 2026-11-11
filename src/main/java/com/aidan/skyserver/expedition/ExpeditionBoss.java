@@ -38,9 +38,9 @@ import java.util.*;
  *  - The body is built from ITEM displays (block items render as full blocks). 26.3 rejected the old
  *    block_display "block_state" text, so the 5.10 body never appeared.
  *  - Health {600, 900, 1300, 1900}, +35% for every extra player in the arena when it wakes.
- *  - No hit counts for more than 10 damage (Sharpness spam can't melt it) - except in its weak window.
+ *  - No hit counts for more than 15 damage (5.14: was 10; Sharpness spam can't melt it) - except in its weak window.
  *  - Weak window: after a ground slam (Colossus) or after charging into a wall (Tyrant) it's stunned for
- *    3 seconds and glows: hits count double (up to 20).
+ *    3 seconds and glows: hits count double (up to 30).
  *  - Erupting floor: glowing, smoking spots appear under the players, then blow up 1.5-2 s later.
  *  - Help keeps coming the whole fight (up to 2 + difficulty helpers alive at once).
  *  - Enrage: after 5 minutes it gets much faster.
@@ -62,8 +62,8 @@ final class ExpeditionBoss {
     static final double[] HP = {600, 900, 1300, 1900};
     /** Extra health for every extra player in the arena (0.35 = +35%). */
     static final double HP_PER_EXTRA_PLAYER = 0.35;
-    /** Most damage one hit can do (doubled in the weak window). */
-    static final float HIT_CAP = 10f;
+    /** Most damage one hit can do (doubled in the weak window). 5.14: 15 (was 10). */
+    static final float HIT_CAP = 15f;
     /** Ticks of the weak window, ticks before it enrages, ticks the Tyrant's shield lasts before broken pillars rise again. */
     static final int WEAK_TICKS = 60, ENRAGE_TICKS = 20 * 60 * 5, SHIELD_TICKS = 20 * 30;
     /** Ticks between helpers (by difficulty). */

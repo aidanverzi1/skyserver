@@ -19,13 +19,14 @@ import java.util.*;
 
 /**
  * Creates and removes bots, and holds the shared bot settings. The games decide when bots join
- * (Gold Wars, Skywars and Bedwars fill empty slots after 3 minutes of waiting).
+ * (Gold Wars, Skywars and Bedwars fill empty slots after 2 minutes of waiting, 5.13; or straight
+ * away when everyone in the queue types /ready - see lobby/Ready).
  */
 public final class BotManager {
     // ---- Settings you can change ----
     public static final boolean ENABLED = true;
-    /** Seconds of waiting with at least one real player before bots fill the empty slots. */
-    public static final int FILL_AFTER_SECONDS = 180;
+    /** Seconds of waiting with at least one real player before bots fill the empty slots. 5.13: 180 -> 120. */
+    public static final int FILL_AFTER_SECONDS = 120;
     /** Kill rewards for killing a bot are multiplied by this. */
     public static final double BOT_KILL_PAY = 0.5;
     /** Win rewards drop by this much for every bot on the other side (0.15 = 15%). */

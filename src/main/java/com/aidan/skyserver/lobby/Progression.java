@@ -12,6 +12,10 @@ import java.util.List;
  * Economy target (same as Rewards.java): about $2,500 an hour of active play from games and the
  * island. Level-ups add about $300/h early on and less later; the free battle pass about $13,500 a
  * season; the Captain's Pass costs more money than it pays back.
+ *
+ * 5.13: the new cosmetic kinds (Skywars cages, bed-break effects, name colours) live in
+ * CosmeticsPlus and join the 5.8 lists here. Exclusive "2" = Voyage stamp book only (never in a
+ * shop or a chest).
  */
 public final class Progression {
     private Progression() {}
@@ -278,20 +282,26 @@ public final class Progression {
     private static List<String[]> extraCosmetics() {
         List<String[]> all = new ArrayList<>();
         for (String[][] list : new String[][][]{SHOP_TITLES, SHOP_TRAILS, KILL_FX, WIN_FX}) all.addAll(Arrays.asList(list));
+        all.addAll(CosmeticLists.all()); // 5.13: cages, bed-break effects, name colours
         return all;
     }
 
-    /** Rarity of a 5.8 cosmetic (-1 for battle-pass ones). */
+    /** Rarity of a 5.8 / 5.13 cosmetic (-1 for battle-pass ones). */
     public static int cosmeticRarity(String id) {
         for (String[] c : extraCosmetics()) if (c[0].equals(id)) return Integer.parseInt(c[2]);
         return -1;
     }
 
-    /** Cosmetics of one rarity; exclusive = include the Legendary-chest-only ones; shopOnly = leave them out. */
+    /**
+     * Cosmetics of one rarity; includeExclusive = also the Legendary-chest-only ones. Stamp-book-only
+     * ones (exclusive "2", 5.13) are never included.
+     */
     public static List<String> cosmeticsOfRarity(int rarity, boolean includeExclusive) {
         List<String> out = new ArrayList<>();
-        for (String[] c : extraCosmetics())
+        for (String[] c : extraCosmetics()) {
+            if (c[3].equals("2")) continue;
             if (Integer.parseInt(c[2]) == rarity && (includeExclusive || c[3].equals("0"))) out.add(c[0]);
+        }
         return out;
     }
 
@@ -306,6 +316,8 @@ public final class Progression {
     /** Display name of any cosmetic id ("" if unknown). */
     public static String cosmeticName(String id) {
         if (id == null) return "";
+        String extra = CosmeticLists.name(id);
+        if (!extra.isEmpty()) return extra;
         for (String[] t : TITLES) if (t[0].equals(id)) return t[1];
         for (String[] t : TRAILS) if (t[0].equals(id)) return "§a" + t[1];
         for (String[] t : EARNED_TITLES) if (t[0].equals(id)) return t[1];

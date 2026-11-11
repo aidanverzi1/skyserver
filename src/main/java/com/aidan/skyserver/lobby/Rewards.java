@@ -18,12 +18,14 @@ import java.util.*;
  *
  * Fairness rules:
  *   - Wins against bots pay less: -15% per bot on the other side, but never below 25%.
- *   - Bedwars (5.8): win, loss and bed pay drop 15% for every OTHER team with at least one bot.
+ *   - Bedwars (5.13): win, loss and bed pay drop 8% for every OTHER team with at least one bot
+ *     (3 teams with bots = 76%: win $532). Was 15% in 5.8.
  *   - Kills on bots pay half.
  *   - The first win of the day in each game pays a big bonus (so short daily sessions feel great,
  *     and grinding all day isn't required to keep up).
  *
  * 5.8: money paid through here gets money boosters (Boosters.money).
+ * 5.13: and the Voyage money perk (+10% in the featured mode); it's also counted for /ss usage.
  */
 public final class Rewards {
     // ---- Gold Wars (a match is ~20 minutes) ---- 5.8: win 600 -> 550, loss 200 -> 175, first win 750 -> 600
@@ -37,8 +39,8 @@ public final class Rewards {
     /** No longer paid (5.8: everyone who doesn't win gets BW_LOSS instead). Kept so old code still compiles. */
     public static final long BW_PLAY = 0;
     public static final int BW_WIN_XP = 110, BW_PLAY_XP = 45, BW_BED_XP = 25, BW_FINAL_XP = 10, BW_KILL_XP = 5;
-    /** Bedwars: -15% for every other team that has at least one bot. */
-    public static final double BW_CUT_PER_BOT_TEAM = 0.15;
+    /** Bedwars: -8% for every other team that has at least one bot (5.13: was 15%). */
+    public static final double BW_CUT_PER_BOT_TEAM = 0.08;
     // ---- Other ----
     public static final double BOT_KILL_PAY = 0.5, WIN_CUT_PER_BOT = 0.15, MIN_BOT_SCALE = 0.25;
     public static final int DAILY_LOGIN_XP = 30, CHEST_OPEN_XP = 10;
@@ -58,7 +60,7 @@ public final class Rewards {
         return Math.max(0.30, 1 - 0.08 * bots);
     }
 
-    /** 5.8 Bedwars: pay scale when this many OTHER teams have at least one bot (3 teams with bots = 55%). */
+    /** Bedwars: pay scale when this many OTHER teams have at least one bot (5.13: 3 teams with bots = 76%). */
     public static double bedwarsTeamScale(int otherTeamsWithBots) {
         return Math.max(0.25, 1 - BW_CUT_PER_BOT_TEAM * otherTeamsWithBots);
     }
@@ -71,10 +73,14 @@ public final class Rewards {
     /** Pays money (with boosters) and tells the player. Bots never get paid. */
     public static void pay(MinecraftServer server, ServerPlayer p, long amount, String why) {
         if (amount <= 0 || p == null || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
-        long boosted = Boosters.money(p, amount);
-        String extra = boosted > amount ? " §d(+" + Economy.format(boosted - amount) + " booster)" : "";
+        long base = amount;
+        long perk = Voyage.moneyPerk(p, amount); // 5.13: Voyage money perk
+        long boosted = Boosters.money(p, perk);
+        String extra = (boosted > perk ? " §d(+" + Economy.format(boosted - perk) + " booster)" : "")
+                + (perk > base ? " §6(+" + Economy.format(perk - base) + " Voyage)" : "");
         amount = boosted;
         Economy.add(server, p.getUUID(), p.getName().getString(), amount);
+        Playtime.money(amount);
         long[] t = TALLY.get(p.getUUID());
         if (t != null) {
             // In a match: a quick note above the hotbar now, one summary line at the end.
