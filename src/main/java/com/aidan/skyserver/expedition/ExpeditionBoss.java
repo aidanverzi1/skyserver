@@ -35,15 +35,19 @@ import java.util.*;
  * players see.
  *
  * 5.11 (much harder):
- *  - The body is built from ITEM displays (block items render as full blocks). 26.3 rejected the old
- *    block_display "block_state" text, so the 5.10 body never appeared.
- *  - Health {600, 900, 1300, 1900}, +35% for every extra player in the arena when it wakes.
+ *  - The body is built from ITEM displays (block items render as full blocks).
  *  - No hit counts for more than 15 damage (5.14: was 10; Sharpness spam can't melt it) - except in its weak window.
  *  - Weak window: after a ground slam (Colossus) or after charging into a wall (Tyrant) it's stunned for
  *    3 seconds and glows: hits count double (up to 30).
  *  - Erupting floor: glowing, smoking spots appear under the players, then blow up 1.5-2 s later.
  *  - Help keeps coming the whole fight (up to 2 + difficulty helpers alive at once).
- *  - Enrage: after 5 minutes it gets much faster.
+ *
+ * 5.17 (a little easier, and co-op):
+ *  - Health down 25%: {450, 675, 975, 1425} (was 600 / 900 / 1300 / 1900).
+ *  - Everything it does hurts 15% less (DAMAGE_SCALE): melee, slam, charge, ring of fire, eruptions, gold shards.
+ *  - Enrage (much faster) comes later, by difficulty: 6:30 / 8:30 / 11:00 / 14:00 (was 5:00 for all).
+ *    More crew doesn't add time.
+ *  - Crew: 2 players = +75% health, 3 players = +130% (CREW_HP; was +35% per extra player).
  *
  *  Cinder Colossus (Fortress): slam (knocks you away), fireball volleys, eruptions, and a ring of fire
  *    that rolls out across the floor - JUMP over it. Wither skeletons at 2/3 and 1/3 health, plus
@@ -58,14 +62,21 @@ final class ExpeditionBoss {
     private ExpeditionBoss() {}
 
     static final String PART_TAG = "skyserver_bosspart";
-    /** Health by difficulty (Easy, Normal, Hard, Nightmare), for one player. */
-    static final double[] HP = {600, 900, 1300, 1900};
-    /** Extra health for every extra player in the arena (0.35 = +35%). */
-    static final double HP_PER_EXTRA_PLAYER = 0.35;
+    /** Health by difficulty (Easy, Normal, Hard, Nightmare), for one player. 5.17: down 25%. */
+    static final double[] HP = {450, 675, 975, 1425};
+    /** 5.17: health multiplier by crew size (1, 2, 3 players). */
+    static final double[] CREW_HP = {1.0, 1.75, 2.3};
+    /** The old "+35% per extra player" (5.17: CREW_HP is used instead; kept so anything that reads these compiles). */
+    static final double HP_PER_EXTRA_PLAYER = 0.75;
+    static final int ENRAGE_TICKS = 390 * 20;
+    /** 5.17: every attack's damage is multiplied by this (0.85 = 15% less than 5.16). */
+    static final float DAMAGE_SCALE = 0.85f;
     /** Most damage one hit can do (doubled in the weak window). 5.14: 15 (was 10). */
     static final float HIT_CAP = 15f;
-    /** Ticks of the weak window, ticks before it enrages, ticks the Tyrant's shield lasts before broken pillars rise again. */
-    static final int WEAK_TICKS = 60, ENRAGE_TICKS = 20 * 60 * 5, SHIELD_TICKS = 20 * 30;
+    /** Ticks of the weak window, and ticks the Tyrant's shield lasts before broken pillars rise again. */
+    static final int WEAK_TICKS = 60, SHIELD_TICKS = 20 * 30;
+    /** 5.17: seconds before it enrages, by difficulty (6:30, 8:30, 11:00, 14:00). */
+    static final int[] ENRAGE_SECONDS = {390, 510, 660, 840};
     /** Ticks between helpers (by difficulty). */
     static final int[] HELPER_TICKS = {500, 420, 360, 300};
     private static int partCounter = 0;
@@ -92,6 +103,11 @@ final class ExpeditionBoss {
 
     static EntityType<? extends Mob> hitboxType(boolean fortress) {
         return fortress ? net.minecraft.world.entity.EntityTypes.RAVAGER : net.minecraft.world.entity.EntityTypes.PIGLIN_BRUTE;
+    }
+
+    /** 5.17: the boss's health for this difficulty and crew size (1-3). */
+    static double health(int diff, int crew) {
+        return HP[diff] * CREW_HP[Math.max(0, Math.min(CREW_HP.length - 1, crew - 1))];
     }
 
     // =====================================================================
@@ -221,7 +237,7 @@ final class ExpeditionBoss {
             bar.setProgress(Math.max(0f, Math.min(1f, frac)));
             if (phase == 1 && frac <= 2f / 3f) enterPhase(2);
             if (phase == 2 && frac <= 1f / 3f) enterPhase(3);
-            if (!enraged && t >= ENRAGE_TICKS) enrage();
+            if (!enraged && t >= ENRAGE_SECONDS[diff] * 20) enrage();
             ServerPlayer target = nearest(fighters);
             tickWeak();
             tickRing(fighters);
@@ -358,7 +374,7 @@ final class ExpeditionBoss {
                 level.sendParticles(ParticleTypes.EXPLOSION, a.x, a.y + 0.5, a.z, 2, 0.4, 0.3, 0.4, 0);
                 level.sendParticles(colossus ? ParticleTypes.LAVA : ParticleTypes.WAX_ON, a.x, a.y + 0.5, a.z, 20, 0.8, 0.8, 0.8, 0.3);
                 level.playSound(null, BlockPos.containing(a), SoundEvents.DRAGON_FIREBALL_EXPLODE, SoundSource.HOSTILE, 1.2f, 1.2f);
-                float dmg = 6 + 2 * diff;
+                float dmg = (6 + 2 * diff) * DAMAGE_SCALE;
                 for (ServerPlayer p : fighters) {
                     double d = Math.hypot(p.getX() - a.x, p.getZ() - a.z);
                     if (d > 2.4 || Math.abs(p.getY() - a.y) > 2.5) continue;
@@ -438,7 +454,7 @@ final class ExpeditionBoss {
             level.playSound(null, body.blockPosition(), SoundEvents.DRAGON_FIREBALL_EXPLODE, SoundSource.HOSTILE, 2f, 0.6f);
             level.sendParticles(ParticleTypes.EXPLOSION, body.getX(), body.getY() + 0.3, body.getZ(), 8, 2.5, 0.2, 2.5, 0);
             level.sendParticles(ParticleTypes.LAVA, body.getX(), body.getY() + 0.3, body.getZ(), 40, 3, 0.3, 3, 0.2);
-            float dmg = 10 + 3 * diff;
+            float dmg = (10 + 3 * diff) * DAMAGE_SCALE;
             for (ServerPlayer p : hooks.fighters()) {
                 double d = p.distanceTo(body);
                 if (d > radius || p.getY() > body.getY() + 3) continue;
@@ -467,7 +483,7 @@ final class ExpeditionBoss {
                     level.sendParticles(ParticleTypes.FLAME, ringAt.x + Math.cos(a) * ring, ringAt.y + 0.2, ringAt.z + Math.sin(a) * ring, 1, 0, 0.15, 0, 0);
                 }
             }
-            float dmg = 6 + 2 * diff;
+            float dmg = (6 + 2 * diff) * DAMAGE_SCALE;
             for (ServerPlayer p : fighters) {
                 if (ringHit.contains(p.getUUID())) continue;
                 double d = Math.hypot(p.getX() - ringAt.x, p.getZ() - ringAt.z);
@@ -540,7 +556,7 @@ final class ExpeditionBoss {
                 for (ServerPlayer p : fighters) {
                     if (hitThisCharge.contains(p.getUUID()) || p.distanceTo(body) > 2.4) continue;
                     hitThisCharge.add(p.getUUID());
-                    p.hurtServer(level, level.damageSources().mobAttack(body), 11 + 3 * diff);
+                    p.hurtServer(level, level.damageSources().mobAttack(body), (11 + 3 * diff) * DAMAGE_SCALE);
                     p.setDeltaMovement(chargeDir.x * 1.5, 0.5, chargeDir.z * 1.5);
                     push(p);
                 }
@@ -588,7 +604,7 @@ final class ExpeditionBoss {
                 Arrow a = new Arrow(level, body, new ItemStack(Items.ARROW), null);
                 a.setPos(from.x, from.y, from.z);
                 a.pickup = AbstractArrow.Pickup.DISALLOWED;
-                a.setBaseDamage(3 + 0.5 * diff);
+                a.setBaseDamage((3 + 0.5 * diff) * DAMAGE_SCALE);
                 a.shoot(Math.cos(yaw) * horiz, aim.y + horiz * 0.08, Math.sin(yaw) * horiz, 1.7f, 2f);
                 level.addFreshEntity(a);
             }
@@ -733,17 +749,17 @@ final class ExpeditionBoss {
     // Making a boss
     // =====================================================================
 
-    /** Turns a freshly spawned hidden mob into the boss and builds its body. crew = players on the expedition. */
+    /** Turns a freshly spawned hidden mob into the boss and builds its body. crew = players on the expedition (1-3). */
     static Fight start(ServerLevel level, Mob body, boolean fortress, int diff, int crew, ExpeditionRooms.Room arena, List<BlockPos> pillarSpots, Hooks hooks) {
         AttributeInstance hp = body.getAttribute(Attributes.MAX_HEALTH);
         if (hp != null) {
             hp.removeModifiers();
-            hp.setBaseValue(HP[diff] * (1 + HP_PER_EXTRA_PLAYER * Math.max(0, crew - 1)));
+            hp.setBaseValue(health(diff, crew));
         }
         AttributeInstance dmg = body.getAttribute(Attributes.ATTACK_DAMAGE);
         if (dmg != null) {
             dmg.removeModifiers();
-            dmg.setBaseValue((fortress ? 12 : 10) + 3 * diff);
+            dmg.setBaseValue(((fortress ? 12 : 10) + 3 * diff) * DAMAGE_SCALE);
         }
         AttributeInstance kb = body.getAttribute(Attributes.KNOCKBACK_RESISTANCE);
         if (kb != null) kb.setBaseValue(1.0);

@@ -17,45 +17,38 @@ import java.util.*;
 /**
  * Nether Expedition rewards (difficulty 0 Easy, 1 Normal, 2 Hard, 3 Nightmare). Every reward number is here.
  *
- *  - Room chests: each chest room's chest is filled with chestLoot() when its guards are beaten. Many
- *    things are rolled per "slot" (e.g. diamond 5 x 32% = five separate 32% rolls for 1 diamond each).
- *  - Treasure Vault: the chest that appears in the boss arena when the boss dies: vault() items.
- *  - Vault money: 21% of the trip's price in total (only one player pays for a trip), split between
- *    everyone in the Nether when the boss dies. The player who paid gets the vault keys and all the
- *    shards; the rest of the crew get a 50% chance at the same key and half the shards. Pass XP and
- *    level XP go to everyone.
+ *  - Room chests: chestLoot() is what ONE player finds in a chest arena's chest once its guards are beaten
+ *    (5.17: every player gets their own roll - ExpeditionChests). Many things are rolled per "slot"
+ *    (e.g. diamond 7 x 32% = seven separate 32% rolls for 1 diamond each).
+ *  - Treasure Vault: vault() is what ONE player finds in the chest that appears when the boss dies.
+ *  - Vault money: 21% of the trip's price, to EVERY player (5.17: everyone pays for their own place, so
+ *    everyone gets the whole reward: the money, the vault key, the bonus-key roll and all the shards).
  *
- * 5.11: the expedition got much harder, so rewards went up ~5% (money, shards, XP, gold, quartz,
- * diamond / golden apple / scrap chances). Netherite upgrade templates went DOWN by a fifth everywhere
- * (room chests 10/15/25% -> 8/12/20%; the Hard and Nightmare vault template 100% -> 80%).
- *
- * 5.13: Wren's Bounty (Voyage) adds one more roll to every rolled room-chest item, and the vault
- * (= the boss died) tells ExpVoyage, which counts a cleared run for the crew.
- *
- * 5.14: enchanted books in the room chests. Every room chest has a BOOK_CHANCE (3%) of one extra book -
- * a plain 3% roll per chest (Wren's Bounty doesn't add to it). The book is one of Sharpness, Protection,
- * Power, Punch or Knockback (equal chances).
- *   Easy / Normal:     a normal level (a random level from 1 up to the vanilla maximum).
- *   Hard / Nightmare:  an EXTRA level, beyond vanilla (a random one of Sharpness VI-VII, Protection V-VII,
- *                      Power VI-VII, Punch III-V, Knockback III-V; EnchantLevelMixin lets the anvil use them).
+ * 5.11: rewards up ~5%; netherite upgrade templates down by a fifth (room chests 8/12/20%, vault 80%).
+ * 5.13: Wren's Bounty (Voyage) adds one more roll to every rolled room-chest item.
+ * 5.14: every room chest has a BOOK_CHANCE (3%) of one enchanted book - Sharpness, Protection, Power, Punch
+ *       or Knockback. Easy / Normal: a vanilla level. Hard / Nightmare: a level beyond vanilla.
+ * 5.17: gold up 75% (room chests 4-9 / 8-15 / 13-21 / 17-29 -> 7-16 / 14-26 / 23-37 / 30-51; the Easy vault's
+ *       gold blocks 2 -> 3 or 4) and diamonds up 40% (room rolls 5x32% / 5x53% / 6x63% / 7x68% ->
+ *       7x32% / 7x53% / 8x66% / 9x74%; vault 4 / 8 / 15 / 13 -> 6 / 11 / 21 / 18).
  *
  * No Wither skulls anywhere (Withers are blocked server-wide): Nightmare gives a shard bundle instead.
  */
 public final class ExpeditionLoot {
     private ExpeditionLoot() {}
 
-    /** Vault money (total, split between the crew): this share of the price. */
+    /** Vault money for each player: this share of the trip's price. */
     static final double VAULT_MONEY = 0.21;
     /** Keys from the vault: {tier, count} (1 Uncommon, 2 Rare, 3 Epic, 4 Legendary). */
     static final int[][] VAULT_KEYS = {{1, 1}, {2, 1}, {3, 1}, {3, 1}};
     /** Extra key chance (%) and its tier: Hard 25% Rare, Nightmare 25% Legendary. */
     static final int[] BONUS_KEY_CHANCE = {0, 0, 25, 25}, BONUS_KEY_TIER = {0, 0, 2, 4};
-    /** Other crew members (not the payer): chance (%) of also getting the vault key. */
-    static final int CREW_KEY_CHANCE = 50;
+    /** The old "crew members' key chance" (5.17: everyone gets the key; kept so anything that reads it compiles). */
+    static final int CREW_KEY_CHANCE = 100;
     static final int[] VAULT_SHARDS = {5, 11, 21, 42};
     static final int[] WIN_PASS_XP = {315, 525, 840, 1_260};
     static final int[] WIN_XP = {158, 263, 420, 630};
-    /** Chance (%) of the netherite upgrade template in the Hard / Nightmare vault (5.11: was always there). */
+    /** Chance (%) of the netherite upgrade template in the Hard / Nightmare vault. */
     static final int VAULT_TEMPLATE_CHANCE = 80;
     /** Hard: chance (%) of a 30-minute +50% money booster (each player). */
     static final int HARD_BOOSTER_CHANCE = 30;
@@ -135,8 +128,8 @@ public final class ExpeditionLoot {
     }
 
     /**
-     * What a room chest holds once its guards are beaten. scrap[0] is increased by the netherite scrap
-     * put in (the vault uses it for Easy/Normal).
+     * What ONE player finds in a room chest once its guards are beaten. scrap[0] is increased by the
+     * netherite scrap put in (that player's vault uses it for Easy/Normal).
      */
     static List<ItemStack> chestLoot(ServerLevel level, int d, boolean fortress, Random rng, int[] scrap) {
         bonusRolls = ExpVoyage.bonusRolls();
@@ -152,28 +145,28 @@ public final class ExpeditionLoot {
         Item rod = fortress ? Items.BLAZE_ROD : Items.CRYING_OBSIDIAN;
         switch (d) {
             case 0 -> {
-                out.add(s(Items.GOLD_INGOT, between(rng, 4, 9)));
+                out.add(s(Items.GOLD_INGOT, between(rng, 7, 16)));
                 out.add(s(Items.QUARTZ, between(rng, 8, 17)));
                 out.add(s(rod, between(rng, 1, 2)));
-                rolls(out, rng, Items.DIAMOND, 5, 32);
+                rolls(out, rng, Items.DIAMOND, 7, 32);
                 rolls(out, rng, Items.GOLDEN_APPLE, 4, 26);
                 scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 2, 16);
             }
             case 1 -> {
-                out.add(s(Items.GOLD_INGOT, between(rng, 8, 15)));
+                out.add(s(Items.GOLD_INGOT, between(rng, 14, 26)));
                 out.add(s(Items.QUARTZ, between(rng, 17, 25)));
                 out.add(s(rod, between(rng, 1, 2)));
-                rolls(out, rng, Items.DIAMOND, 5, 53);
+                rolls(out, rng, Items.DIAMOND, 7, 53);
                 if (rng.nextInt(100) < 21) out.add(diamondPiece(level, rng, 0, 0, 0));
                 rolls(out, rng, Items.GOLDEN_APPLE, 4, 42);
                 scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 2, 26);
                 rolls(out, rng, Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 1, 8);
             }
             case 2 -> {
-                out.add(s(Items.GOLD_INGOT, between(rng, 13, 21)));
+                out.add(s(Items.GOLD_INGOT, between(rng, 23, 37)));
                 out.add(s(Items.QUARTZ, between(rng, 25, 34)));
                 out.add(s(rod, between(rng, 2, 3)));
-                rolls(out, rng, Items.DIAMOND, 6, 63);
+                rolls(out, rng, Items.DIAMOND, 8, 66);
                 if (rng.nextInt(100) < 32) out.add(rng.nextBoolean() ? diamondPiece(level, rng, 2, 2, 0) : diamondPiece(level, rng, 0, 0, 0));
                 rolls(out, rng, Items.GOLDEN_APPLE, 4, 53);
                 scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 3, 26);
@@ -181,10 +174,10 @@ public final class ExpeditionLoot {
                 rolls(out, rng, Items.TOTEM_OF_UNDYING, 1, 5);
             }
             default -> {
-                out.add(s(Items.GOLD_INGOT, between(rng, 17, 29)));
+                out.add(s(Items.GOLD_INGOT, between(rng, 30, 51)));
                 out.add(s(Items.QUARTZ, between(rng, 34, 50)));
                 out.add(s(rod, between(rng, 3, 4)));
-                rolls(out, rng, Items.DIAMOND, 7, 68);
+                rolls(out, rng, Items.DIAMOND, 9, 74);
                 if (rng.nextInt(100) < 47) out.add(diamondPiece(level, rng, 3, 3, 2));
                 rolls(out, rng, Items.GOLDEN_APPLE, 4, 63);
                 rolls(out, rng, Items.ENCHANTED_GOLDEN_APPLE, 1, 8);
@@ -199,26 +192,29 @@ public final class ExpeditionLoot {
         return out;
     }
 
-    /** What's in the Treasure Vault chest (shared: whoever takes it). roomScrap = scrap that came out of the room chests. */
+    /**
+     * What ONE player finds in the Treasure Vault chest. roomScrap = the scrap that came out of that
+     * player's room chests. (5.17: telling ExpVoyage the boss died moved to Expedition.bossDown - this is
+     * now called once per player.)
+     */
     static List<ItemStack> vault(ServerLevel level, int d, Random rng, int roomScrap) {
-        com.aidan.skyserver.Safe.run("expedition voyage boss", () -> ExpVoyage.bossKilled(level, d)); // 5.13
         List<ItemStack> out = new ArrayList<>();
         switch (d) {
             case 0 -> {
-                out.add(s(Items.DIAMOND, 4));
-                out.add(s(Items.GOLD_BLOCK, 2));
+                out.add(s(Items.DIAMOND, 6));
+                out.add(s(Items.GOLD_BLOCK, rng.nextBoolean() ? 4 : 3));
                 // No scrap from the rooms: one guaranteed. Otherwise a 50% chance.
                 if (roomScrap == 0 || rng.nextBoolean()) out.add(s(Items.NETHERITE_SCRAP, 1));
             }
             case 1 -> {
-                out.add(s(Items.DIAMOND, 8));
+                out.add(s(Items.DIAMOND, 11));
                 out.add(s(Items.ANCIENT_DEBRIS, 1));
                 out.add(diamondArmor(level, rng, 2));
                 // At least one scrap from the rooms: one more. None: two.
                 out.add(s(Items.NETHERITE_SCRAP, roomScrap >= 1 ? 1 : 2));
             }
             case 2 -> {
-                out.add(s(Items.DIAMOND, 15));
+                out.add(s(Items.DIAMOND, 21));
                 out.add(s(Items.ANCIENT_DEBRIS, 2));
                 if (rng.nextInt(100) < VAULT_TEMPLATE_CHANCE) out.add(s(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 1));
                 out.add(s(Items.ENCHANTED_GOLDEN_APPLE, 1));
@@ -234,7 +230,7 @@ public final class ExpeditionLoot {
                 out.add(s(Items.NETHERITE_INGOT, 1 + rng.nextInt(2)));
                 if (rng.nextInt(100) < VAULT_TEMPLATE_CHANCE) out.add(s(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 1));
                 out.add(s(Items.ENCHANTED_GOLDEN_APPLE, 2));
-                out.add(s(Items.DIAMOND, 13));
+                out.add(s(Items.DIAMOND, 18));
             }
         }
         return out;
@@ -246,8 +242,13 @@ public final class ExpeditionLoot {
         return it;
     }
 
-    /** Vault money for the whole crew (split between them). */
-    static long vaultMoneyTotal(int d) {
+    /** Vault money for ONE player (5.17: everyone gets it in full). */
+    static long vaultMoney(int d) {
         return Math.round(Expedition.PRICES[d] * VAULT_MONEY);
+    }
+
+    /** The old name (it used to be split between the crew); kept so anything that still calls it compiles. */
+    static long vaultMoneyTotal(int d) {
+        return vaultMoney(d);
     }
 }

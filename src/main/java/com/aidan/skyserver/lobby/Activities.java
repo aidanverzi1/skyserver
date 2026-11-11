@@ -33,6 +33,8 @@ import net.minecraft.world.phys.Vec3;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static com.aidan.skyserver.lobby.ActivityDesign.*;
 import static com.aidan.skyserver.lobby.LobbyDesign.G;
@@ -49,14 +51,19 @@ import static com.aidan.skyserver.lobby.LobbyDesign.G;
  *    finish of any course each day pays (same for all). Parkour skill XP: a full amount for the
  *    first finish of each course each day, a little for repeats (they only take ~10 seconds),
  *    capped each day.
- *  - Fishing Pond: walk up to the lake for a rod. Every catch pays a little; any catch can be a key.
+ *  - Fishing Pond (5.17): walk up to the lake for a rod. Fish pay $5-20 by type and weight, plus $1 per
+ *    10 Fishing levels (max +$5), for the first FISH_PAID_PER_DAY fish a day. Treasure pays $75, up to
+ *    $750 a day. Junk pays nothing. Any catch can be a key (the first FISH_KEY_CATCHES_PER_DAY catches a
+ *    day, shared with island fishing - IslandFishing). AFK check: a catch only pays or rolls a key if you
+ *    moved or looked around since your last catch.
  *  - Daily quests: /quests, the compass menu, or the quest board by spawn.
  *
  * Every activity has a best-score board and a once-a-day reward. Saved in activities.json.
+ * 5.17: init() also starts ExtraProtection (Protection VI/VII) and IslandFishing.
  */
 public final class Activities {
     // ---- Rewards (first time each day, unless noted) ----
-    // 5.8: archery goals pay 150 / 250 / 400 (were 200 / 300 / 500); paid pond catches 60 a day (was 100).
+    // 5.8: archery goals pay 150 / 250 / 400 (were 200 / 300 / 500).
     static final long MAZE_MONEY = 200, ELYTRA_MONEY = 250, ARCHERY_MONEY = 150, SPLEEF_WIN_MONEY = 150, SPLEEF_FIRST_WIN = 250;
     static final int MAZE_XP = 40, ELYTRA_XP = 50, ARCHERY_XP = 40, SPLEEF_WIN_XP = 30;
     /** 5.9: Parkour skill XP from elytra courses: first finish of each course per day, then per repeat, and the most repeats pay per day. */
@@ -64,10 +71,26 @@ public final class Activities {
     static final int ARCHERY_REWARD_SCORE = 40;
     /** Daily archery goals: score these (once each per day) for the rewards. */
     static final int[] ARCHERY_GOALS = {40, 70, 100};
-    static final long FISH_MONEY = 10, JUNK_MONEY = 2, TREASURE_MONEY = 15;
-    static final int FISH_PAID_PER_DAY = 60;
-    /** Key chances per catch (any catch), rolled on the paid catches each day: common .. legendary. */
+
+    // ---- 5.17 fishing (edit here) ----
+    /** Treasure pays this, until TREASURE_MONEY_PER_DAY has been paid for treasure today. Junk pays nothing. */
+    static final long TREASURE_MONEY = 75, TREASURE_MONEY_PER_DAY = 750;
+    /** Fish pay: {lowest, highest} dollars by type; where in between depends on the weight. */
+    static final Map<String, long[]> FISH_PAY = Map.of(
+            "cod", new long[]{5, 14}, "salmon", new long[]{7, 20}, "tropical_fish", new long[]{5, 12}, "pufferfish", new long[]{6, 16});
+    /** Weight ranges (lb) - the same as Old Gil's contest (SkillHalls.FISH_RANGE); trophies are heavier and pay the top. */
+    static final Map<String, double[]> FISH_WEIGHT = Map.of(
+            "cod", new double[]{2, 12}, "salmon", new double[]{3, 20}, "tropical_fish", new double[]{0.3, 2.5}, "pufferfish", new double[]{1, 6});
+    /** +$1 per this many Fishing levels, at most FISH_SKILL_BONUS_MAX extra per fish. */
+    static final int FISH_SKILL_BONUS_LEVELS = 10, FISH_SKILL_BONUS_MAX = 5;
+    /** Paid fish a day at the pond. */
+    static final int FISH_PAID_PER_DAY = 100;
+    /** Catches a day that can roll a key (pond + island together). */
+    static final int FISH_KEY_CATCHES_PER_DAY = 100;
+    /** Key chances per catch: common .. legendary. */
     static final double[] FISH_KEY_CHANCE = {1 / 250.0, 1 / 500.0, 1 / 2500.0, 1 / 5000.0, 1 / 10000.0};
+    /** AFK check: since the last catch the player must have moved this far or turned this many degrees. */
+    static final double AFK_MOVE = 0.5, AFK_TURN = 2.0;
 
     private static MinecraftServer server;
     private static long now = 0;
@@ -82,6 +105,8 @@ public final class Activities {
     public static void init() {
         Duels.init();
         ElytraCourses.init();
+        IslandFishing.init();                         // 5.17
+        com.aidan.skyserver.ExtraProtection.init();  // 5.17
         AttackBlockCallback.EVENT.register((player, level, hand, pos, dir) -> {
             if (level.isClientSide() || !Lobby.isLobby(level) || !(player instanceof ServerPlayer sp)) return InteractionResult.PASS;
             if (spleefBreak(sp, (ServerLevel) level, pos)) return InteractionResult.FAIL;
@@ -307,7 +332,8 @@ public final class Activities {
     private static final Map<String, Map<UUID, Integer>> BEST = new HashMap<>(); // activity -> player -> best (ticks or points)
     private static final Map<UUID, String> NAMES = new HashMap<>();
     private static final Map<String, String> REWARDED = new HashMap<>();       // "activity:uuid" -> day
-    private static final Map<UUID, int[]> FISH_TODAY = new HashMap<>();        // {paid catches, keys} today
+    /** 5.17: today per player: {paid fish, keys, key-eligible catches (pond + island), treasure money}. */
+    private static final Map<UUID, int[]> FISH_TODAY = new HashMap<>();
     private static String fishDay = "";
     private static boolean loaded = false;
 
@@ -325,7 +351,9 @@ public final class Activities {
         if (root.has("fishDay")) fishDay = root.get("fishDay").getAsString();
         if (root.has("fish")) for (Map.Entry<String, JsonElement> e : root.getAsJsonObject("fish").entrySet()) {
             var a = e.getValue().getAsJsonArray();
-            FISH_TODAY.put(UUID.fromString(e.getKey()), new int[]{a.get(0).getAsInt(), a.get(1).getAsInt()});
+            int[] v = new int[4];
+            for (int i = 0; i < v.length && i < a.size(); i++) v[i] = a.get(i).getAsInt(); // pre-5.17 saves have 2 numbers
+            FISH_TODAY.put(UUID.fromString(e.getKey()), v);
         }
     }
 
@@ -341,8 +369,7 @@ public final class Activities {
         REWARDED.forEach((k, v) -> { if (v.equals(today)) rewarded.addProperty(k, v); });
         FISH_TODAY.forEach((k, v) -> {
             var a = new com.google.gson.JsonArray();
-            a.add(v[0]);
-            a.add(v[1]);
+            for (int x : v) a.add(x);
             fish.add(k.toString(), a);
         });
         root.add("best", best);
@@ -1301,12 +1328,15 @@ public final class Activities {
     }
 
     // =====================================================================
-    // Fishing
+    // Fishing (5.17 rework: pay by type + weight, treasure cap, shared key limit, AFK check)
     // =====================================================================
 
     private static final Set<UUID> FISHING = new HashSet<>();
     private static final Set<String> FISH = Set.of("cod", "salmon", "tropical_fish", "pufferfish");
     private static final Set<String> TREASURE = Set.of("enchanted_book", "name_tag", "saddle", "nautilus_shell", "bow", "fishing_rod");
+    private static final Pattern WEIGHT = Pattern.compile("([0-9]+(?:\\.[0-9]+)?) lb");
+    /** Where each player was standing and looking at their last catch: {x, z, yaw, pitch}. */
+    private static final Map<UUID, double[]> LAST_CATCH = new HashMap<>();
 
     private static void fishingTick(ServerPlayer p) {
         UUID id = p.getUUID();
@@ -1315,7 +1345,7 @@ public final class Activities {
             if (near && !ARCHERY.containsKey(id) && !ELYTRA.containsKey(id) && !ALIVE.contains(id)) {
                 FISHING.add(id);
                 Lobby.refreshKit(p);
-                Announce.actionBar(p, "§bYou got a fishing rod! §7Cast into the lake - every catch pays.");
+                Announce.actionBar(p, "§bYou got a fishing rod! §7Cast into the lake - fish and treasure pay.");
             }
             return;
         }
@@ -1335,48 +1365,108 @@ public final class Activities {
         }
     }
 
-    private static void caught(ServerPlayer p, ItemStack s) {
+    /** Today's fishing numbers for this player (resets at midnight). */
+    private static int[] fishToday(UUID id) {
         load();
         String today = LocalDate.now().toString();
         if (!today.equals(fishDay)) {
             fishDay = today;
             FISH_TODAY.clear();
         }
-        int[] day = FISH_TODAY.computeIfAbsent(p.getUUID(), k -> new int[2]);
+        return FISH_TODAY.computeIfAbsent(id, k -> new int[4]);
+    }
+
+    /** AFK check: true if the player moved or looked around since their last catch (and remembers this one). */
+    private static boolean movedSinceLastCatch(ServerPlayer p) {
+        double[] cur = {p.getX(), p.getZ(), p.getYRot(), p.getXRot()};
+        double[] last = LAST_CATCH.put(p.getUUID(), cur);
+        if (last == null) return true;
+        double turn = Math.abs(net.minecraft.util.Mth.wrapDegrees(cur[2] - last[2])) + Math.abs(cur[3] - last[3]);
+        return Math.hypot(cur[0] - last[0], cur[1] - last[1]) >= AFK_MOVE || turn >= AFK_TURN;
+    }
+
+    /** One key roll for a key-eligible catch (pond or island). Counts toward the daily limit. */
+    private static void rollFishKey(ServerPlayer p, int[] day) {
+        if (day[2] >= FISH_KEY_CATCHES_PER_DAY) return;
+        day[2]++;
+        // Best key first: one roll per catch.
+        double roll = p.getRandom().nextDouble(), acc = 0;
+        for (int tier = 4; tier >= 0; tier--) {
+            acc += FISH_KEY_CHANCE[tier];
+            if (roll < acc) {
+                day[1]++;
+                Keys.reward(p.level().getServer(), p.getUUID(), tier, 1, "(fished up a key!)");
+                if (tier >= 2) for (ServerPlayer o : p.level().getServer().getPlayerList().getPlayers())
+                    if (o != p) Lobby.msg(o, "§b🎣 §e" + p.getName().getString() + " §7fished up a " + Keys.COLORS[tier] + Keys.NAMES[tier] + " Key§7!");
+                break;
+            }
+        }
+    }
+
+    /** What a fish pays: $lo-$hi by where its weight sits in the type's range, plus the Fishing skill bonus. */
+    static long fishPay(UUID id, String path, double weight) {
+        long[] pay = FISH_PAY.getOrDefault(path, new long[]{5, 10});
+        double[] range = FISH_WEIGHT.getOrDefault(path, new double[]{1, 10});
+        double f = weight < 0 ? 0 : Math.max(0, Math.min(1, (weight - range[0]) / (range[1] - range[0])));
+        long base = Math.round(pay[0] + (pay[1] - pay[0]) * f);
+        long bonus = Math.min(FISH_SKILL_BONUS_MAX, Skills.level(id, Skills.Skill.FISHING) / FISH_SKILL_BONUS_LEVELS);
+        return base + bonus;
+    }
+
+    private static void caught(ServerPlayer p, ItemStack s) {
+        int[] day = fishToday(p.getUUID());
         String path = BuiltInRegistries.ITEM.getKey(s.getItem()).getPath();
         boolean fish = FISH.contains(path), treasure = TREASURE.contains(path) && (!path.equals("bow") && !path.equals("fishing_rod") || s.isEnchanted());
         String name = s.getHoverName().getString();
-        long money = Math.round((fish ? FISH_MONEY : treasure ? TREASURE_MONEY : JUNK_MONEY) * Skills.fishingPay(p.getUUID()));
+        boolean active = movedSinceLastCatch(p);
+        String weighed = fish ? SkillHalls.weigh(p, path, name) : "";
         String msg;
-        boolean paid = day[0] < FISH_PAID_PER_DAY;
-        if (paid) {
-            day[0]++;
-            Economy.add(server, p.getUUID(), p.getName().getString(), money);
-            msg = (treasure ? "§6§lTreasure! " : "§b") + "Caught " + name + "!" + (fish ? SkillHalls.weigh(p, path, name) : "") + " §a+" + Economy.format(money);
+        if (!active) {
+            msg = "§bCaught " + name + "!" + weighed + " §7(move or look around between catches to earn money and keys)";
+        } else if (fish) {
+            if (day[0] < FISH_PAID_PER_DAY) {
+                double w = -1;
+                Matcher m = WEIGHT.matcher(weighed.replaceAll("§.", ""));
+                if (m.find()) w = Double.parseDouble(m.group(1));
+                long money = fishPay(p.getUUID(), path, w);
+                day[0]++;
+                Economy.add(server, p.getUUID(), p.getName().getString(), money);
+                msg = "§bCaught " + name + "!" + weighed + " §a+" + Economy.format(money) + " §8(" + day[0] + "/" + FISH_PAID_PER_DAY + ")";
+            } else {
+                msg = "§bCaught " + name + "!" + weighed + " §7(today's " + FISH_PAID_PER_DAY + " paid fish are used up - still counts for quests and the contest)";
+            }
+        } else if (treasure) {
+            long money = Math.min(TREASURE_MONEY, TREASURE_MONEY_PER_DAY - day[3]);
+            if (money > 0) {
+                day[3] += (int) money;
+                Economy.add(server, p.getUUID(), p.getName().getString(), money);
+                msg = "§6§lTreasure! §6Caught " + name + "! §a+" + Economy.format(money) + " §8(" + Economy.format(day[3]) + "/" + Economy.format(TREASURE_MONEY_PER_DAY) + " today)";
+            } else {
+                msg = "§6§lTreasure! §6Caught " + name + "! §7(today's treasure money is used up)";
+            }
         } else {
-            msg = "§bCaught " + name + "!" + (fish ? SkillHalls.weigh(p, path, name) : "") + " §7(daily pay used up - still counts for quests and the contest)";
+            msg = "§7Caught " + name + " §8(junk pays nothing)";
         }
         Announce.actionBar(p, msg);
         if (fish) Quests.progress(p, "fish", 1);
-        if (paid) {
-            // Best key first: one roll per catch.
-            double roll = p.getRandom().nextDouble(), acc = 0;
-            for (int tier = 4; tier >= 0; tier--) {
-                acc += FISH_KEY_CHANCE[tier];
-                if (roll < acc) {
-                    day[1]++;
-                    Keys.reward(server, p.getUUID(), tier, 1, "(fished up a key!)");
-                    if (tier >= 2) for (ServerPlayer o : p.level().getServer().getPlayerList().getPlayers())
-                        if (o != p) Lobby.msg(o, "§b🎣 §e" + p.getName().getString() + " §7fished up a " + Keys.COLORS[tier] + Keys.NAMES[tier] + " Key§7!");
-                    break;
-                }
-            }
-        }
+        if (active) rollFishKey(p, day);
         load();
         BEST.computeIfAbsent("fish", k -> new HashMap<>()).merge(p.getUUID(), 1, Integer::sum);
         NAMES.put(p.getUUID(), p.getName().getString());
         save();
         Levels.showBar(p);
+    }
+
+    /** 5.17: a catch on a Sky Island (IslandFishing). No money; the same key chance, sharing the daily limit and AFK check. */
+    static void islandCatch(ServerPlayer p) {
+        if (server == null) server = p.level().getServer();
+        int[] day = fishToday(p.getUUID());
+        if (!movedSinceLastCatch(p)) return;
+        int before = day[2], keysBefore = day[1];
+        rollFishKey(p, day);
+        if (before == FISH_KEY_CATCHES_PER_DAY - 1 && keysBefore == day[1])
+            Announce.actionBar(p, "§7That was your last key-eligible catch today §8(" + FISH_KEY_CATCHES_PER_DAY + "/" + FISH_KEY_CATCHES_PER_DAY + ")");
+        save();
     }
 
     /** Fish flying toward a player at the pond shouldn't be cleaned up by the lobby. */

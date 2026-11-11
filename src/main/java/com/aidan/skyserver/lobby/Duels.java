@@ -35,7 +35,8 @@ import java.util.*;
  *  - /duel <player> [bet] sends a challenge; they click Accept (or /duel accept).
  *  - Both players pay the bet when the duel starts; the winner gets both bets. A draw (time runs
  *    out with equal health, or the server stops) gives the bets back.
- *  - Everyone gets the same kit: iron armour, iron sword, bow, 12 arrows, 2 golden apples, shield.
+ *  - 5.17: everyone gets the same kit: unenchanted diamond armour, a diamond sword, 1 golden apple and
+ *    1 golden carrot (unbreakable). The lobby hotbar comes back when the duel ends.
  *  - Leaving the pit or logging out loses the duel. Duels last up to 3 minutes; after that the
  *    one with more health wins.
  */
@@ -293,19 +294,18 @@ public final class Duels {
         }
     }
 
-    /** The duel kit (called from the lobby hotbar refresh). */
+    /** The duel kit (called from the lobby hotbar refresh). 5.17: diamond gear, 1 golden apple, 1 golden carrot. */
     static void kit(ServerPlayer p) {
         Inventory inv = p.getInventory();
         inv.clearContent();
-        inv.setItem(0, Activities.unbreakable(new ItemStack(Items.IRON_SWORD)));
-        inv.setItem(1, Activities.unbreakable(new ItemStack(Items.BOW)));
-        inv.setItem(2, new ItemStack(Items.GOLDEN_APPLE, 2));
-        inv.setItem(8, new ItemStack(Items.ARROW, 12));
-        p.setItemSlot(EquipmentSlot.OFFHAND, Activities.unbreakable(new ItemStack(Items.SHIELD)));
-        p.setItemSlot(EquipmentSlot.HEAD, Activities.unbreakable(new ItemStack(Items.IRON_HELMET)));
-        p.setItemSlot(EquipmentSlot.CHEST, Activities.unbreakable(new ItemStack(Items.IRON_CHESTPLATE)));
-        p.setItemSlot(EquipmentSlot.LEGS, Activities.unbreakable(new ItemStack(Items.IRON_LEGGINGS)));
-        p.setItemSlot(EquipmentSlot.FEET, Activities.unbreakable(new ItemStack(Items.IRON_BOOTS)));
+        inv.setItem(0, Activities.unbreakable(new ItemStack(Items.DIAMOND_SWORD)));
+        inv.setItem(1, new ItemStack(Items.GOLDEN_APPLE, 1));
+        inv.setItem(2, new ItemStack(Items.GOLDEN_CARROT, 1));
+        p.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+        p.setItemSlot(EquipmentSlot.HEAD, Activities.unbreakable(new ItemStack(Items.DIAMOND_HELMET)));
+        p.setItemSlot(EquipmentSlot.CHEST, Activities.unbreakable(new ItemStack(Items.DIAMOND_CHESTPLATE)));
+        p.setItemSlot(EquipmentSlot.LEGS, Activities.unbreakable(new ItemStack(Items.DIAMOND_LEGGINGS)));
+        p.setItemSlot(EquipmentSlot.FEET, Activities.unbreakable(new ItemStack(Items.DIAMOND_BOOTS)));
     }
 
     public static boolean inDuel(UUID id) {
@@ -315,7 +315,7 @@ public final class Duels {
     static boolean allowUse(UUID id, ItemStack held) {
         Duel d = DUELS.get(id);
         if (d == null || !d.fighting(now)) return false;
-        return held.is(Items.BOW) || held.is(Items.GOLDEN_APPLE) || held.is(Items.SHIELD);
+        return held.is(Items.GOLDEN_APPLE) || held.is(Items.GOLDEN_CARROT);
     }
 
     /** Can this player hit that entity in the lobby? Only your opponent, once the fight starts. */

@@ -38,6 +38,9 @@ import java.util.function.Function;
  *   Legendary - the top levels (Sharpness VII, Protection VII, Power VII, Punch V, Knockback V), weight 3 each.
  * The Legendary chest also gives the Longbow and the Fire Wand (weight 4 each; the Longbow comes with an arrow).
  * Hard / Nightmare Expedition room chests give the same books at a flat 3% (ExpeditionLoot).
+ *
+ * 5.17: ender pearls are out of the Rare chest (nothing replaces them; the other Rare prizes are a little
+ * more likely). Pearls will come back in a later update.
  * Change anything here and restart.
  */
 public final class Loot {
@@ -156,14 +159,14 @@ public final class Loot {
                 token(6, "§fCommon cosmetic", "cosmetic:0", Items.NAME_TAG),
                 token(5, "§d12 Key Shards", "shards:12", Items.AMETHYST_SHARD),
                 keys(5, 0, 2), keys(4, 2, 1)));
-        // ---- Rare ($5,000) ----
+        // ---- Rare ($5,000) ---- (5.17: ender pearls removed)
         TABLES.add(List.of(
                 money(18, 2_500), money(6, 4_000),
                 item(8, "Diamond Pickaxe (Fortune I, Efficiency III, Unbreaking II)",
                         enchanted(Items.DIAMOND_PICKAXE, Enchantments.FORTUNE, 1, Enchantments.EFFICIENCY, 3, Enchantments.UNBREAKING, 2)),
                 item(6, "Diamond Chestplate (Protection III)", enchanted(Items.DIAMOND_CHESTPLATE, Enchantments.PROTECTION, 3)),
                 item(6, "Diamond Sword (Sharpness IV, Unbreaking III)", enchanted(Items.DIAMOND_SWORD, Enchantments.SHARPNESS, 4, Enchantments.UNBREAKING, 3)),
-                stack(6, Items.TOTEM_OF_UNDYING, 1), stack(6, Items.ENDER_PEARL, 16), stack(6, Items.GOLDEN_APPLE, 8),
+                stack(6, Items.TOTEM_OF_UNDYING, 1), stack(6, Items.GOLDEN_APPLE, 8),
                 item(5, "3 Fire Resistance Potions (8:00)", s -> fireRes()),
                 spawner(3, "minecraft:cow", "Cow"), spawner(3, "minecraft:sheep", "Sheep"),
                 token(6, "§b60 min +50% XP Booster", "booster:xp:60:50", Items.EXPERIENCE_BOTTLE),
