@@ -1725,7 +1725,9 @@ public final class Expedition {
         HEALTH_LOCK.remove(p.getUUID());
         IN_FIGHT.remove(p.getUUID());
         ServerLevel level = (ServerLevel) p.level();
-        dropAll(p, level);
+        // 5.18: a Recovery Charm (End Expedition, Void Shop) breaks instead and they keep everything.
+        boolean saved = EndRewards.useCharm(p);
+        if (!saved) dropAll(p, level);
         p.setHealth(p.getMaxHealth());
         p.clearFire();
         p.removeAllEffects();
@@ -1737,13 +1739,15 @@ public final class Expedition {
         Islands.Island is = own != null ? own : run != null ? islandById(run.islandId) : null;
         if (run != null) {
             run.inside.remove(p.getUUID());
-            for (ServerPlayer m : inside(run)) Lobby.msg(m, "§c" + p.getName().getString() + " " + why + "! §7Their things are where they fell.");
+            for (ServerPlayer m : inside(run)) Lobby.msg(m, "§c" + p.getName().getString() + " " + why + "! §7"
+                    + (saved ? "Their Recovery Charm saved their things." : "Their things are where they fell."));
         }
         Lobby.runLater(() -> {
             if (p.hasDisconnected()) return;
             if (is != null) Islands.teleportHome(p, is);
             else Lobby.goToLobby(p);
-            Lobby.msg(p, "§c§lYou " + why + " in the Nether §7and lost everything you were carrying. §8(Your ender chest is safe.)");
+            Lobby.msg(p, saved ? "§b§lYour Recovery Charm broke §7- you " + why + " in the Nether but kept everything you carried."
+                    : "§c§lYou " + why + " in the Nether §7and lost everything you were carrying. §8(Your ender chest is safe.)");
         });
         if (run != null && run.inside.isEmpty()) endRun(run, "nobody is left");
     }

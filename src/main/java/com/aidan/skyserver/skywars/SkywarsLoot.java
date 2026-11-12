@@ -54,7 +54,7 @@ public final class SkywarsLoot {
 
     // ---- Extras ----
     private static final List<Entry> X_ISLAND = List.of(
-            e(6, it(Items.SNOWBALL, 4, 12)), e(5, it(Items.EGG, 4, 8)),
+            e(6, it(Items.SNOWBALL, 1, 5)), e(5, it(Items.EGG, 1, 5)), // 5.18: 1-5 (they knock back now)
             e(4, it(Items.ARROW, 4, 10)), e(3, it(Items.BOW, 1, 1)), e(3, () -> bridgeEgg(1)), e(3, it(Items.WATER_BUCKET, 1, 1)),
             e(2, () -> SwItems.soup(1)), e(2, () -> SwItems.fireball(1)), e(1, it(Items.ENDER_PEARL, 1, 1)),
             e(2, SwItems::speedPotion), e(2, SwItems::jumpPotion), e(1, SwItems::hook), e(2, it(Items.COBWEB, 1, 3)));

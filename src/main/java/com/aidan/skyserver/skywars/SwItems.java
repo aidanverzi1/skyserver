@@ -44,7 +44,7 @@ import java.util.Random;
  *  - Healing Soup: right-click to heal 3 hearts instantly.
  *  - Instant TNT: lights itself the moment it's placed.
  *  - Bridge Egg: throw it to build a 20-block bridge (see BridgeEggs).
- *  - Snowballs knock players back hard in Skywars.
+ *  - Snowballs and eggs knock players back a little in Skywars (SwThrowables, 5.18).
  * Plus vanilla ender pearls, speed and jump potions, and "lucky" enchanted gear.
  */
 public final class SwItems {
@@ -81,16 +81,9 @@ public final class SwItems {
             if (!sp.isCreative()) held.shrink(1);
             return InteractionResult.SUCCESS;
         });
-        // Snowballs push players back much harder than normal.
-        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
-            if (entity instanceof ServerPlayer target && source.getDirectEntity() instanceof Snowball ball
-                    && SkywarsGame.isAlive(target.getUUID())) {
-                Vec3 push = ball.getDeltaMovement().multiply(1, 0, 1).normalize().scale(0.9);
-                target.setDeltaMovement(target.getDeltaMovement().add(push.x, 0.35, push.z));
-                target.connection.send(new ClientboundSetEntityMotionPacket(target));
-            }
-            return true;
-        });
+        // 5.18: snowballs and eggs knock players back (SwThrowables; the old damage-event push never fired,
+        // since snowballs do 0 damage to players).
+        SwThrowables.init();
     }
 
     public static boolean is(ItemStack stack, String name) {

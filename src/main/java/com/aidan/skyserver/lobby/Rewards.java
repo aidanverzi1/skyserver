@@ -29,13 +29,14 @@ import java.util.*;
  */
 public final class Rewards {
     // ---- Gold Wars (a match is ~20 minutes) ---- 5.8: win 600 -> 550, loss 200 -> 175, first win 750 -> 600
-    public static final long GW_WIN = 550, GW_LOSS = 175, GW_GOLD = 15, GW_KILL = 15, GW_FIRST_WIN = 600;
+    // 5.18: Skywars, Gold Wars and Bedwars pay 25% more (they're meant to be the main money makers).
+    public static final long GW_WIN = 688, GW_LOSS = 219, GW_GOLD = 19, GW_KILL = 19, GW_FIRST_WIN = 750;
     public static final int GW_WIN_XP = 120, GW_LOSS_XP = 50, GW_GOLD_XP = 10, GW_KILL_XP = 6;
     // ---- Skywars (a match is ~5-8 minutes) ----
-    public static final long SW_WIN = 500, SW_SECOND = 200, SW_THIRD = 100, SW_KILL = 30, SW_PLAY = 40, SW_FIRST_WIN = 500;
+    public static final long SW_WIN = 625, SW_SECOND = 250, SW_THIRD = 125, SW_KILL = 38, SW_PLAY = 50, SW_FIRST_WIN = 625;
     public static final int SW_WIN_XP = 100, SW_SECOND_XP = 50, SW_THIRD_XP = 30, SW_KILL_XP = 12, SW_PLAY_XP = 15;
     // ---- Bedwars (a match is ~15-30 minutes) ---- 5.8: win 700, loss 100, bed 100, first win $500 (+ Common Key)
-    public static final long BW_WIN = 700, BW_LOSS = 100, BW_BED = 100, BW_FINAL = 25, BW_KILL = 10, BW_FIRST_WIN = 500;
+    public static final long BW_WIN = 875, BW_LOSS = 125, BW_BED = 125, BW_FINAL = 31, BW_KILL = 13, BW_FIRST_WIN = 625;
     /** No longer paid (5.8: everyone who doesn't win gets BW_LOSS instead). Kept so old code still compiles. */
     public static final long BW_PLAY = 0;
     public static final int BW_WIN_XP = 110, BW_PLAY_XP = 45, BW_BED_XP = 25, BW_FINAL_XP = 10, BW_KILL_XP = 5;

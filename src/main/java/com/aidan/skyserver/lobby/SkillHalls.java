@@ -287,7 +287,8 @@ public final class SkillHalls {
                 if (lvl >= 40) t.add(item(24, 8, Items.GOLDEN_CARROT)); else spare += 24;
             }
             case "fields" -> {
-                t.add(item(250, 16, Items.WHEAT));
+                t.add(item(240, 16, Items.WHEAT));
+                t.add(item(10, 1, Items.SNIFFER_EGG)); // 5.18: 1% sniffer egg
                 t.add(item(140, 1, Items.SHEEP_SPAWN_EGG));
                 t.add(item(140, 1, Items.COW_SPAWN_EGG));
                 t.add(item(120, 1, Items.CHICKEN_SPAWN_EGG));

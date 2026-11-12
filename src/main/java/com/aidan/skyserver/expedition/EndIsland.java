@@ -7,7 +7,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -20,6 +22,8 @@ import java.util.Random;
  *  - Wren's Pad: a purpur platform where the crew lands and Captain Wren waits.
  *  - THE LEDGE: a 7-block-wide end stone brick ring 8 blocks under the island's rim, all the way round. Get knocked
  *    off the edge and you land on it; throw a pearl back up.
+ *  - 5.18b: a 2-wide end stone brick STAIRCASE spirals up the tallest pillar, and a WAVE BUTTON sits on top of the
+ *    bedrock podium (anyone presses it to start the next wave). Neither can be broken.
  *
  * The shape is the same every trip (fixed seed). Rebuilding only changes blocks that differ from the plan, so
  * repairs after a trip are quick. Building is spread over several ticks (COLUMNS_PER_TICK).
@@ -56,6 +60,80 @@ final class EndIsland {
             int radius = 2 + (top - 76) / 9;
             PILLARS.add(new int[]{x, z, radius, top});
         }
+    }
+
+    /** The tallest pillar (the one with the staircase). */
+    static int[] stairPillar() {
+        int[] best = PILLARS.get(0);
+        for (int[] p : PILLARS) if (p[3] > best[3]) best = p;
+        return best;
+    }
+
+    /** The staircase: block -> stair facing (the direction you walk to go up). Built once, same every trip. */
+    static final Map<Long, net.minecraft.core.Direction> STAIRS = new LinkedHashMap<>();
+    /** Full blocks from the top step across to the pillar top. */
+    static final List<Long> BRIDGE = new ArrayList<>();
+
+    static {
+        int[] p = stairPillar();
+        int cx = p[0], cz = p[1], top = p[3];
+        double inner = p[2] + 1.6; // just outside the pillar (checked: 39 steps, no step inside it, no overlap)
+        List<int[]> cells = new ArrayList<>();
+        int lx = Integer.MIN_VALUE, lz = Integer.MIN_VALUE;
+        // Start on the side facing the island's middle, walk round the pillar.
+        double a0 = Math.atan2(-cz, -cx);
+        for (int i = 0; i <= 4000 && cells.size() < (top - Y0) + 1; i++) {
+            double a = a0 + i * (Math.PI * 4 / 4000);
+            int x = (int) Math.floor(cx + 0.5 + Math.cos(a) * inner), z = (int) Math.floor(cz + 0.5 + Math.sin(a) * inner);
+            if (x == lx && z == lz) continue;
+            if (lx != Integer.MIN_VALUE && x != lx && z != lz) cells.add(new int[]{x, lz}); // no diagonal steps
+            if (cells.size() >= (top - Y0) + 1) break;
+            cells.add(new int[]{x, z});
+            lx = x;
+            lz = z;
+        }
+        for (int i = 0; i < cells.size(); i++) {
+            int[] c = cells.get(i), n = i + 1 < cells.size() ? cells.get(i + 1) : c;
+            int y = Y0 + 1 + i;
+            if (y > top) break;
+            net.minecraft.core.Direction d = n[0] > c[0] ? net.minecraft.core.Direction.EAST : n[0] < c[0] ? net.minecraft.core.Direction.WEST
+                    : n[1] > c[1] ? net.minecraft.core.Direction.SOUTH : net.minecraft.core.Direction.NORTH;
+            STAIRS.put(BlockPos.asLong(c[0], y, c[1]), d);
+            // The outer half of the 2-wide step (one further from the pillar), same height and facing.
+            double ox = c[0] + 0.5 - (cx + 0.5), oz = c[1] + 0.5 - (cz + 0.5);
+            int sx = Math.abs(ox) >= Math.abs(oz) ? (int) Math.signum(ox) : 0, sz = sx == 0 ? (int) Math.signum(oz) : 0;
+            STAIRS.putIfAbsent(BlockPos.asLong(c[0] + sx, y, c[1] + sz), d);
+        }
+        // From the last step straight across to the pillar top (same height as the pillar's top block).
+        if (!cells.isEmpty()) {
+            int[] last = cells.get(Math.min(cells.size(), top - Y0) - 1);
+            double bx = last[0] + 0.5, bz = last[1] + 0.5;
+            for (int i = 0; i < 6; i++) {
+                double dx = cx + 0.5 - bx, dz = cz + 0.5 - bz, len = Math.hypot(dx, dz);
+                if (len < p[2] + 0.5) break;
+                bx += dx / len;
+                bz += dz / len;
+                int x = (int) Math.floor(bx), z = (int) Math.floor(bz);
+                if (Math.hypot(x - cx, z - cz) <= p[2] + 0.5) break;
+                BRIDGE.add(BlockPos.asLong(x, top, z));
+            }
+        }
+    }
+
+    /** The wave button: on top of the podium's bedrock. */
+    static BlockPos buttonPos() {
+        return new BlockPos(0, Y0 + PODIUM_HEIGHT + 1, 0);
+    }
+
+    static BlockState buttonState() {
+        return Blocks.POLISHED_BLACKSTONE_BUTTON.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.ATTACH_FACE, net.minecraft.world.level.block.state.properties.AttachFace.FLOOR);
+    }
+
+    /** Puts the button back if something knocked it off. */
+    static void keepButton(ServerLevel level) {
+        BlockPos b = buttonPos();
+        if (!level.getBlockState(b).is(Blocks.POLISHED_BLACKSTONE_BUTTON)) level.setBlock(b, buttonState(), Block.UPDATE_ALL);
     }
 
     /** True for the pillars that get an iron-bar cage (the 2 shortest). */
@@ -105,7 +183,8 @@ final class EndIsland {
     static boolean locked(BlockPos p) {
         int x = p.getX(), y = p.getY(), z = p.getZ();
         if (onPad(x, z, 0) && y >= Y0 - 1 && y <= Y0) return true;
-        if (Math.abs(x) <= 1 && Math.abs(z) <= 1 && y >= Y0 && y <= Y0 + PODIUM_HEIGHT) return true;
+        if (Math.abs(x) <= 1 && Math.abs(z) <= 1 && y >= Y0 && y <= Y0 + PODIUM_HEIGHT + 1) return true;
+        if (STAIRS.containsKey(p.asLong()) || BRIDGE.contains(p.asLong())) return true;
         return y == LEDGE_Y && onLedge(x, z);
     }
 
@@ -159,6 +238,7 @@ final class EndIsland {
             pillars();
             podium();
             pad();
+            stairs();
             done = true;
             return true;
         }
@@ -216,6 +296,27 @@ final class EndIsland {
             BlockState bedrock = Blocks.BEDROCK.defaultBlockState();
             for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) set(dx, Y0 + 1, dz, bedrock);
             for (int y = Y0 + 2; y <= Y0 + PODIUM_HEIGHT; y++) set(0, y, 0, bedrock);
+            BlockPos b = buttonPos();
+            set(b.getX(), b.getY(), b.getZ(), buttonState());
+        }
+
+        /** The staircase round the tallest pillar: end stone brick stairs with headroom above each step. */
+        private void stairs() {
+            BlockState air = Blocks.AIR.defaultBlockState();
+            for (Map.Entry<Long, net.minecraft.core.Direction> e : STAIRS.entrySet()) {
+                BlockPos p = BlockPos.of(e.getKey());
+                BlockState st = Blocks.END_STONE_BRICK_STAIRS.defaultBlockState()
+                        .setValue(net.minecraft.world.level.block.StairBlock.FACING, e.getValue());
+                set(p.getX(), p.getY(), p.getZ(), st);
+                for (int up = 1; up <= 2; up++) {
+                    long above = BlockPos.asLong(p.getX(), p.getY() + up, p.getZ());
+                    if (!STAIRS.containsKey(above)) set(p.getX(), p.getY() + up, p.getZ(), air);
+                }
+            }
+            for (long b : BRIDGE) {
+                BlockPos p = BlockPos.of(b);
+                set(p.getX(), p.getY(), p.getZ(), Blocks.END_STONE_BRICKS.defaultBlockState());
+            }
         }
 
         private void pad() {

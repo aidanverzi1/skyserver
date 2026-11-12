@@ -53,6 +53,9 @@ import java.util.*;
  *
  * MINI BOSSES (waves 5, 15, 25, then round again): Shulker Matriarch (lifts everyone into the air, calls sentries),
  *  Void Herald (swaps places with you, tears rifts in the floor), The Tempest (pulls everyone in, then blasts them away).
+ * 5.18b: 2 more guards a wave; in waves 1-10 at most 1 Riftwing, 1 Void Gust and 1 Obsidian Golem per wave (+1 each
+ *  every 10 waves); golems half health, Riftwings and Void Gusts -30% health; every guard hits 10% harder (special
+ *  attacks rounded up); 10th-wave bosses half health. The dragon's crystals skip the staircase pillar.
  * BOSSES (waves 10, 20, 30, then round again): the Ender Dragon (crystals on every pillar heal it), The Hollow King
  *  (steals the blocks you placed, calls shades at 2/3 and 1/3 health, gets faster at the end), The Eye (floats over
  *  the podium, sweeping beams, mining fatigue that eats your block-breaking).
@@ -92,9 +95,14 @@ final class EndMobs {
     static final double CREW_HEALTH = 0.70, CREW_DAMAGE = 0.10;
     static final double[] BOSS_CREW_HP = {1.0, 1.75, 2.3};
     /** Most guards in one wave. */
-    static final int GUARD_CAP = 20;
-    /** Health at wave 1-10 (before the multipliers). */
-    static final double MATRIARCH_HP = 250, HERALD_HP = 300, TEMPEST_HP = 280, DRAGON_HP = 300, KING_HP = 450, EYE_HP = 400;
+    static final int GUARD_CAP = 22;
+    /** 5.18b: extra guards in every wave, and the most Riftwings / Void Gusts / Golems in one wave in waves 1-10 (+1 per 10 waves). */
+    static final int EXTRA_GUARDS = 2, TOUGH_CAP = 1;
+    /** 5.18b: guards hit 10% harder; Riftwings and Void Gusts have 30% less health. */
+    static final double GUARD_DAMAGE_BONUS = 1.10, FLYER_HEALTH = 0.70;
+    /** Health at wave 1-10 (before the multipliers). 5.18b: 10th-wave bosses halved, golem 60 -> 30. */
+    static final double MATRIARCH_HP = 250, HERALD_HP = 300, TEMPEST_HP = 280, DRAGON_HP = 150, KING_HP = 225, EYE_HP = 200;
+    static final double GOLEM_HP = 30;
     /** Crystal Warden heal per second for every guard (2 = 1 heart). */
     static final float CRYSTAL_HEAL = 2f;
 
@@ -123,6 +131,35 @@ final class EndMobs {
         return 1 + BASE_DAMAGE + TIER_DAMAGE * tier(wave);
     }
 
+    /** What wave guards hit with (5.18b: +10%). */
+    static double guardDamage(int wave) {
+        return damageFactor(wave) * GUARD_DAMAGE_BONUS;
+    }
+
+    /** A guard's special-attack damage, rounded up to a whole number. */
+    static float hit(double base, int wave) {
+        return (float) Math.ceil(base * guardDamage(wave));
+    }
+
+    /** Guards in a wave before 5.18b and now (with the crew's extras). */
+    static int oldCount(int wave, int crewSize) {
+        int pos = (wave - 1) % 10 + 1, t = tier(wave), extra = (crewSize - 1) * CREW_EXTRA_GUARDS;
+        if (pos == 10) return 0;
+        return Math.min(20, (pos == 5 ? 2 + t : 3 + (pos - 1) / 2 + t) + extra);
+    }
+
+    static int guardCount(int wave, int crewSize) {
+        int pos = (wave - 1) % 10 + 1, t = tier(wave), extra = (crewSize - 1) * CREW_EXTRA_GUARDS;
+        if (pos == 10) return 0;
+        return Math.min(GUARD_CAP, (pos == 5 ? 2 + t : 3 + (pos - 1) / 2 + t) + EXTRA_GUARDS + extra);
+    }
+
+    /** Fragments per guard this wave, so the wave's total matches what it was before the extra guards. */
+    static double fragmentScale(EndExpedition.Run run, int wave) {
+        int now = guardCount(wave, run.crewSize);
+        return now <= 0 ? 1.0 : (double) oldCount(wave, run.crewSize) / now;
+    }
+
     /** What's coming in this wave, for Wren's chat line. */
     static String preview(int wave) {
         int pos = (wave - 1) % 10 + 1;
@@ -137,30 +174,28 @@ final class EndMobs {
 
     /** Sends in the whole wave. */
     static void spawnWave(ServerLevel l, EndExpedition.Run run, int wave) {
-        int pos = (wave - 1) % 10 + 1, t = tier(wave), extra = run.crewSize - 1;
+        int pos = (wave - 1) % 10 + 1, t = tier(wave);
         if (pos == 10) {
             spawnBoss(l, run, bossFor(wave), wave);
             return;
         }
-        int count;
-        if (pos == 5) {
-            spawnMini(l, run, miniFor(wave), wave);
-            count = 2 + t + extra * CREW_EXTRA_GUARDS;
-        } else count = 3 + (pos - 1) / 2 + t + extra * CREW_EXTRA_GUARDS;
-        count = Math.min(GUARD_CAP, count);
+        if (pos == 5) spawnMini(l, run, miniFor(wave), wave);
+        int count = guardCount(wave, run.crewSize);
         List<Kind> pool = new ArrayList<>(List.of(Kind.THRALL, Kind.BLINK_ARCHER));
         if (pos >= 2 || t > 0) pool.add(Kind.RIFTWING);
         if (pos >= 3 || t > 0) pool.add(Kind.VOID_GUST);
         if (pos >= 4 || t > 0) pool.add(Kind.CHORUS_BOMBER);
         if (pos >= 6 || t > 0) pool.add(Kind.SHULKER_SENTRY);
         if (pos >= 7 || t > 0) pool.add(Kind.WATCHER);
-        int golems = (pos >= 8 || t > 0) ? (t >= 2 ? 2 : 1) : 0;
+        if (pos >= 8 || t > 0) pool.add(Kind.OBSIDIAN_GOLEM);
+        // 5.18b: at most TOUGH_CAP (+1 per 10 waves) Riftwings, Void Gusts and Golems in one wave.
+        int cap = TOUGH_CAP + t;
+        Map<Kind, Integer> made = new EnumMap<>(Kind.class);
         for (int i = 0; i < count; i++) {
-            Kind k;
-            if (golems > 0 && RNG.nextInt(count) < 2) {
-                k = Kind.OBSIDIAN_GOLEM;
-                golems--;
-            } else k = pool.get(RNG.nextInt(pool.size()));
+            Kind k = pool.get(RNG.nextInt(pool.size()));
+            if ((k == Kind.RIFTWING || k == Kind.VOID_GUST || k == Kind.OBSIDIAN_GOLEM) && made.getOrDefault(k, 0) >= cap)
+                k = RNG.nextBoolean() ? Kind.THRALL : Kind.BLINK_ARCHER;
+            made.merge(k, 1, Integer::sum);
             guard(l, run, k, wave);
         }
         if (pos == 3 || pos == 7) wardenCrystal(l, run);
@@ -221,7 +256,7 @@ final class EndMobs {
                 base(m, Attributes.SCALE, 1.8);
                 base(m, Attributes.KNOCKBACK_RESISTANCE, 1.0);
                 base(m, Attributes.MOVEMENT_SPEED, 0.17);
-                base(m, Attributes.MAX_HEALTH, 60);
+                base(m, Attributes.MAX_HEALTH, GOLEM_HP);
                 base(m, Attributes.ATTACK_DAMAGE, 8);
             }
             case SHADE -> {
@@ -233,7 +268,8 @@ final class EndMobs {
             }
         }
         int extra = run.crewSize - 1;
-        finish(l, run, m, healthFactor(wave) * (1 + CREW_HEALTH * extra), damageFactor(wave) * (1 + CREW_DAMAGE * extra));
+        double flyer = (k == Kind.RIFTWING || k == Kind.VOID_GUST) ? FLYER_HEALTH : 1.0;
+        finish(l, run, m, healthFactor(wave) * flyer * (1 + CREW_HEALTH * extra), guardDamage(wave) * (1 + CREW_DAMAGE * extra));
     }
 
     private static void spawnMini(ServerLevel l, EndExpedition.Run run, Kind k, int wave) {
@@ -282,6 +318,7 @@ final class EndMobs {
                 String cmd = "data merge entity " + m.getUUID() + " {DragonPhase:0}";
                 Safe.run("end dragon phase", () -> l.getServer().getCommands().performPrefixedCommand(l.getServer().createCommandSourceStack().withSuppressedOutput(), cmd));
                 for (int[] p : EndIsland.PILLARS) {
+                    if (p == EndIsland.stairPillar()) continue; // 5.18b: the staircase pillar has none
                     Entity c = crystal(l, p);
                     if (c != null) run.dragonCrystals.add(c.getUUID());
                 }
@@ -327,7 +364,7 @@ final class EndMobs {
 
     private static void wardenCrystal(ServerLevel l, EndExpedition.Run run) {
         List<int[]> open = new ArrayList<>();
-        for (int[] p : EndIsland.PILLARS) if (!EndIsland.caged(p)) open.add(p);
+        for (int[] p : EndIsland.PILLARS) if (!EndIsland.caged(p) && p != EndIsland.stairPillar()) open.add(p);
         int[] p = open.get(RNG.nextInt(open.size()));
         Entity c = crystal(l, p);
         if (c == null) return;
@@ -486,7 +523,7 @@ final class EndMobs {
                 l.sendParticles(ParticleTypes.EXPLOSION, m.getX(), m.getY() + 0.3, m.getZ(), 4, 1.5, 0.2, 1.5, 0);
                 for (ServerPlayer p : ps) {
                     if (p.distanceToSqr(m) > 16) continue;
-                    p.hurtServer(l, l.damageSources().mobAttack(m), (float) (6 * dmg));
+                    p.hurtServer(l, l.damageSources().mobAttack(m), hit(6, run.wave));
                     push(p, away(m.position(), p.position(), 0.6, 0.7));
                 }
                 smashPlaced(l, run, m.blockPosition(), 5, Integer.MAX_VALUE);
@@ -495,7 +532,7 @@ final class EndMobs {
                 if (t % 4 != 1) return;
                 ServerPlayer p = EndExpedition.nearest(run, m.position());
                 if (p == null || p.distanceToSqr(m) > 16 * 16 || !m.hasLineOfSight(p)) return;
-                beam(l, run, m, p, 20, (float) (4 * dmg), 1.2);
+                beam(l, run, m, p, 20, hit(4, run.wave), 1.2);
             }
             case MATRIARCH -> {
                 if (t % 10 == 5) {
@@ -672,8 +709,9 @@ final class EndMobs {
         if (FUSE.isEmpty()) return;
         for (Iterator<Map.Entry<UUID, Integer>> it = FUSE.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<UUID, Integer> e = it.next();
+            if (!run.mobs.contains(e.getKey())) continue; // the other End island's bomber
             if (!(l.getEntity(e.getKey()) instanceof Mob m) || !m.isAlive()) {
-                if (l.getEntity(e.getKey()) == null || !run.mobs.contains(e.getKey())) it.remove();
+                it.remove();
                 continue;
             }
             ServerPlayer p = EndExpedition.nearest(run, m.position());
@@ -693,14 +731,13 @@ final class EndMobs {
 
     private static void popBomber(ServerLevel l, EndExpedition.Run run, Mob m) {
         Vec3 at = m.position();
-        double dmg = damageFactor(run.wave);
         l.sendParticles(ParticleTypes.EXPLOSION, at.x, at.y + 0.5, at.z, 3, 0.6, 0.4, 0.6, 0);
         l.sendParticles(ParticleTypes.PORTAL, at.x, at.y + 0.5, at.z, 80, 1.5, 1, 1.5, 0.5);
         l.playSound(null, m.blockPosition(), SoundEvents.DRAGON_FIREBALL_EXPLODE, SoundSource.HOSTILE, 1.3f, 1.2f);
         m.discard();
         for (ServerPlayer p : EndExpedition.fighters(run)) {
             if (p.distanceToSqr(at.x, at.y, at.z) > 9) continue;
-            p.hurtServer(l, l.damageSources().magic(), (float) (6 * dmg));
+            p.hurtServer(l, l.damageSources().magic(), hit(6, run.wave));
             BlockPos g = ground(l, run, 8, EndIsland.R - 6, 0);
             p.teleportTo(g.getX() + 0.5, g.getY(), g.getZ() + 0.5);
             l.playSound(null, g, SoundEvents.ENDERMAN_TELEPORT, SoundSource.PLAYERS, 1f, 1f);
@@ -713,7 +750,9 @@ final class EndMobs {
     // =====================================================================
 
     /** A guard (or its arrow) hurt a player. */
-    static void hitPlayer(ServerLevel l, ServerPlayer p, Mob attacker, Kind k) {
+    static void hitPlayer(ServerLevel l, EndExpedition.Run run, ServerPlayer p, Mob attacker, Kind k) {
+        // Omen: Featherweight - every guard hit knocks you back about twice as far.
+        if (run.omen(EndOmens.FEATHERWEIGHT) && !k.boss()) push(p, away(attacker.position(), p.position(), 0.8, 0.35));
         switch (k) {
             case THRALL -> {
                 if (RNG.nextInt(100) < 30) p.addEffect(new MobEffectInstance(MobEffects.LEVITATION, 20, 0));
@@ -764,8 +803,10 @@ final class EndMobs {
     }
 
     /** Forget everything about a finished trip. */
-    static void clear() {
-        KIND.clear();
-        FUSE.clear();
+    static void clear(EndExpedition.Run run) {
+        for (UUID id : run.mobs) {
+            KIND.remove(id);
+            FUSE.remove(id);
+        }
     }
 }

@@ -6,7 +6,12 @@
   "mixins": [
     "SwingRecorderMixin",
     "IslandTimeMixin",
-    "FarmlandMixin"
+    "FarmlandMixin",
+    "WitherSpawnMixin",
+    "IslandSpawnMixin",
+    "SpawnerCapMixin",
+    "ChestPagesMixin",
+    "EnchantLevelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

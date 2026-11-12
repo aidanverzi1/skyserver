@@ -47,7 +47,7 @@ import java.util.function.Function;
  * first/middle extra-level book (the old Epic book list), Legendary unenchanted netherite that comes with a random
  * top-level book (the old Legendary book list). The extra-level books are no longer prizes on their own. The
  * Elytra and the Shulker Box are gone (End things only come from the End Expedition); the Elytra's place is an
- * End Expedition ticket.
+ * End Expedition ticket. Later in 5.18: the Fortune II and Efficiency IV books and the Beacon are gone too.
  * Change anything here and restart.
  */
 public final class Loot {
@@ -194,8 +194,6 @@ public final class Loot {
         TABLES.add(table(
                 money(20, 1_000), money(8, 1_500),
                 stack(10, Items.DIAMOND, 8), stack(8, Items.GOLDEN_APPLE, 4),
-                item(7, "Fortune II Book", book(Enchantments.FORTUNE, 2)),
-                item(7, "Efficiency IV Book", book(Enchantments.EFFICIENCY, 4)),
                 armour(3, IRON, "Iron", " (Protection III)", Enchantments.PROTECTION, 3),
                 item(6, "2 Fire Resistance Potions (8:00)", s -> fireRes()),
                 token(8, "§630 min +25% Money Booster", "booster:money:30:25", Items.GOLD_NUGGET),
@@ -239,7 +237,6 @@ public final class Loot {
                 armour(4, NETHERITE, "Netherite", " " + WITH_LEGENDARY_BOOK),
                 item(6, "Netherite Sword (Sharpness V, Unbreaking III, Looting III)",
                         enchanted(Items.NETHERITE_SWORD, Enchantments.SHARPNESS, 5, Enchantments.UNBREAKING, 3, Enchantments.LOOTING, 3)),
-                stack(6, Items.BEACON, 1),
                 spawner(4, "minecraft:zombie", "Zombie"), spawner(4, "minecraft:skeleton", "Skeleton"),
                 spawner(3, "minecraft:spider", "Spider"), spawner(2, "minecraft:cave_spider", "Cave Spider"),
                 spawner(3, "minecraft:creeper", "Creeper"), spawner(2, "minecraft:blaze", "Blaze"),

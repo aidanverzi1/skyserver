@@ -49,8 +49,9 @@ import java.util.function.Function;
  *  Every 10th wave cleared - $1,000 for each player, paid on the spot.
  *  Wave 30 cleared - the Voidwalker Pearl (a reusable ender pearl, 64 throws), once per player.
  *
- * VOID FRAGMENTS are items while you carry them. They turn into your Void Fragment balance when you get home, when
- * you put them in Wren's Strongbox, or when you open the Void Shop. Spend them in the Void Shop (/voidshop).
+ * VOID FRAGMENTS are items while you carry them. They turn into your Void Fragment balance when you get home or
+ * when you put them in Wren's Strongbox. Spend them in the Void Shop (/voidshop) - ON YOUR ISLAND only (5.18b).
+ * 5.18b: guards drop fewer fragments each (more guards per wave, same total per wave); omens add +25% each.
  * The RECOVERY CHARM is made in the Void Shop from 5 echo shards: if you die on the End Expedition while carrying
  * one, it breaks and you go home with everything you had.
  */
@@ -75,6 +76,8 @@ public final class EndRewards {
             "shaper", "silence", "snout", "spire", "tide", "vex", "ward", "wayfinder", "wild"};
     static final Set<String> RARE_TRIMS = Set.of("bolt", "eye", "flow", "silence", "spire", "tide", "vex", "ward");
     static final int TRIM_PRICE = 100, RARE_TRIM_PRICE = 140;
+    /** 5.18b Void Shop prices. */
+    static final int PEARL_PRICE = 15, HEAD_PRICE = 75;
 
     private static final Random RNG = new Random();
 
@@ -143,16 +146,27 @@ public final class EndRewards {
         return RNG.nextInt(100) < percent;
     }
 
-    /** Void Fragments for one guard kill: (tier + 1) / 2 on average (wave 1-10: half a fragment, 11-20: 1, 21-30: 1.5...). */
-    static int guardFragments(int tier) {
-        int twice = tier + 1;
-        return twice / 2 + (twice % 2 == 1 && RNG.nextBoolean() ? 1 : 0);
+    /**
+     * Void Fragments for one guard kill. Before 5.18b it was (tier + 1) / 2 on average; scale shrinks that so a
+     * wave with more guards still gives the same total (and grows it +25% per omen in force).
+     */
+    static int guardFragments(int tier, double scale) {
+        double avg = (tier + 1) / 2.0 * scale;
+        int whole = (int) Math.floor(avg);
+        return whole + (RNG.nextDouble() < avg - whole ? 1 : 0);
+    }
+
+    /** Whole fragments from a base amount times a bonus (the leftover share is a chance for one more). */
+    static int scaled(int base, double bonus) {
+        double v = base * bonus;
+        int whole = (int) Math.floor(v);
+        return whole + (RNG.nextDouble() < v - whole ? 1 : 0);
     }
 
     /** A wave guard died: every crew member gets their own rolls. */
-    static void guard(List<ServerPlayer> crew, EndMobs.Kind kind, int tier) {
+    static void guard(List<ServerPlayer> crew, EndMobs.Kind kind, int tier, double scale) {
         for (ServerPlayer p : crew) {
-            int f = guardFragments(tier);
+            int f = guardFragments(tier, scale);
             if (f > 0) give(p, fragments(f));
             if (roll(CHORUS_CHANCE)) give(p, new ItemStack(Items.CHORUS_FLOWER));
             if (roll(HEAD_CHANCE)) give(p, new ItemStack(item(new String[]{"zombie_head", "skeleton_skull", "creeper_head"}[RNG.nextInt(3)])));
@@ -164,9 +178,9 @@ public final class EndRewards {
     }
 
     /** A mini boss died. which = 0 for the trip's first mini boss (wave 5), 1 for wave 15, 2+ after. */
-    static void miniBoss(MinecraftServer server, List<ServerPlayer> crew, int which, int tier) {
+    static void miniBoss(MinecraftServer server, List<ServerPlayer> crew, int which, int tier, double bonus) {
         for (ServerPlayer p : crew) {
-            give(p, fragments(3 + 2 * tier));
+            give(p, fragments(scaled(3 + 2 * tier, bonus)));
             if (roll(SHELL_CHANCE[Math.min(which, SHELL_CHANCE.length - 1)])) give(p, new ItemStack(Items.SHULKER_SHELL));
             else Lobby.msg(p, "§7No shulker shell this time.");
             if (roll(MINI_ECHO_CHANCE)) give(p, new ItemStack(Items.ECHO_SHARD));
@@ -175,9 +189,9 @@ public final class EndRewards {
     }
 
     /** A boss died at this wave. dragon = it was the Ender Dragon. */
-    static void boss(MinecraftServer server, List<ServerPlayer> crew, int wave, int tier, boolean dragon) {
+    static void boss(MinecraftServer server, List<ServerPlayer> crew, int wave, int tier, boolean dragon, double bonus) {
         for (ServerPlayer p : crew) {
-            give(p, fragments(5 + 3 * tier));
+            give(p, fragments(scaled(5 + 3 * tier, bonus)));
             if (roll(BOSS_ECHO_CHANCE)) give(p, new ItemStack(Items.ECHO_SHARD));
             if (dragon && !Progress.egg(p.getUUID())) {
                 Progress.setEgg(p.getUUID());
@@ -423,26 +437,34 @@ public final class EndRewards {
             int price = RARE_TRIMS.contains(t) ? RARE_TRIM_PRICE : TRIM_PRICE;
             o.add(new Offer(9 + i, "§f" + nice + " Armor Trim", price, 0, s -> trim(t), item(t + "_armor_trim_smithing_template")));
         }
+        // Row 4
         o.add(new Offer(28, "§dElytra", 150, 0, s -> new ItemStack(Items.ELYTRA), Items.ELYTRA));
-        o.add(new Offer(30, "§bRecovery Charm", 0, CHARM_ECHO_SHARDS, s -> charm(), Items.RECOVERY_COMPASS));
-        o.add(new Offer(32, "§54 Dragon's Breath", 15, 0, s -> new ItemStack(Items.DRAGON_BREATH, 4), Items.DRAGON_BREATH));
-        o.add(new Offer(34, "§54 Chorus Flowers", 20, 0, s -> new ItemStack(Items.CHORUS_FLOWER, 4), Items.CHORUS_FLOWER));
-        o.add(new Offer(37, "§f16 Wind Charges", 15, 0, s -> new ItemStack(Items.WIND_CHARGE, 16), Items.WIND_CHARGE));
-        o.add(new Offer(39, "§bSwift Sneak III Book", 60, 0, s -> book(s, Enchantments.SWIFT_SNEAK, 3), Items.ENCHANTED_BOOK));
+        o.add(new Offer(29, "§bRecovery Charm", 0, CHARM_ECHO_SHARDS, s -> charm(), Items.RECOVERY_COMPASS));
+        o.add(new Offer(30, "§d16 Ender Pearls", PEARL_PRICE, 0, s -> new ItemStack(Items.ENDER_PEARL, 16), Items.ENDER_PEARL));
+        o.add(new Offer(31, "§54 Dragon's Breath", 15, 0, s -> new ItemStack(Items.DRAGON_BREATH, 4), Items.DRAGON_BREATH));
+        o.add(new Offer(32, "§54 Chorus Flowers", 20, 0, s -> new ItemStack(Items.CHORUS_FLOWER, 4), Items.CHORUS_FLOWER));
+        o.add(new Offer(33, "§516 Chorus Fruit", 10, 0, s -> new ItemStack(Items.CHORUS_FRUIT, 16), Items.CHORUS_FRUIT));
+        o.add(new Offer(34, "§d4 End Crystals", 40, 0, s -> new ItemStack(Items.END_CRYSTAL, 4), Items.END_CRYSTAL));
+        // Row 5
+        o.add(new Offer(37, "§f64 End Rods", 20, 0, s -> new ItemStack(Items.END_ROD, 64), Items.END_ROD));
+        o.add(new Offer(38, "§d64 Purpur Blocks", 15, 0, s -> new ItemStack(Items.PURPUR_BLOCK, 64), Items.PURPUR_BLOCK));
+        o.add(new Offer(39, "§f16 Wind Charges", 15, 0, s -> new ItemStack(Items.WIND_CHARGE, 16), Items.WIND_CHARGE));
+        o.add(new Offer(40, "§bSwift Sneak III Book", 60, 0, s -> book(s, Enchantments.SWIFT_SNEAK, 3), Items.ENCHANTED_BOOK));
         o.add(new Offer(41, "§bSoul Speed III Book", 60, 0, s -> book(s, Enchantments.SOUL_SPEED, 3), Items.ENCHANTED_BOOK));
-        o.add(new Offer(43, "§bWind Burst III Book", 90, 0, s -> book(s, Enchantments.WIND_BURST, 3), Items.ENCHANTED_BOOK));
+        o.add(new Offer(42, "§bWind Burst III Book", 90, 0, s -> book(s, Enchantments.WIND_BURST, 3), Items.ENCHANTED_BOOK));
+        // Row 6: mob heads
+        String[][] heads = {{"zombie_head", "§2Zombie Head"}, {"skeleton_skull", "§7Skeleton Skull"}, {"creeper_head", "§aCreeper Head"}, {"piglin_head", "§6Piglin Head"}};
+        for (int i = 0; i < heads.length; i++) {
+            String id = heads[i][0];
+            o.add(new Offer(46 + i * 2, heads[i][1], HEAD_PRICE, 0, s -> new ItemStack(item(id)), item(id)));
+        }
         return o;
     }
 
-    /** Where the Void Shop opens: the islands, the lobby, or the End island between waves. */
+    /** 5.18b: the Void Shop only opens on the island world (not in the End, so pearls can't be bought mid-trip). */
     public static void openShop(ServerPlayer p) {
-        boolean end = EndExpedition.isEnd(p.level());
-        if (end && EndExpedition.fighting()) {
-            Lobby.msg(p, "§cNot in the middle of a wave! §7Open the Void Shop between waves.");
-            return;
-        }
-        if (!end && !com.aidan.skyserver.island.Islands.isIsland(p.level()) && !Lobby.isLobby(p.level())) {
-            Lobby.msg(p, "§cThe Void Shop opens on your island, in the lobby, or between End waves.");
+        if (!com.aidan.skyserver.island.Islands.isIsland(p.level())) {
+            Lobby.msg(p, "§cThe Void Shop opens on your Sky Island (§e/is§c).");
             return;
         }
         bank(p);
@@ -479,8 +501,8 @@ public final class EndRewards {
             for (int i = 0; i < box.getContainerSize(); i++) box.setItem(i, ItemStack.EMPTY);
             int bal = balance(viewer);
             box.setItem(4, Stacks.named(fragments(1), "§5§lVoid Fragments: " + bal,
-                    "§7Earned from End Expedition guards and bosses.", "§7Carried fragments are banked when you get home,",
-                    "§7put them in Wren's Strongbox, or open this shop."));
+                    "§7Earned from End Expedition guards and bosses.", "§7Carried fragments are banked when you get home",
+                    "§7or put them in Wren's Strongbox."));
             for (Offer o : offers) {
                 ItemStack icon = new ItemStack(o.icon());
                 String cost = o.echo() > 0 ? "§7Cost: §3" + o.echo() + " echo shards §8(from your inventory; you have " + echoShards(viewer) + ")"

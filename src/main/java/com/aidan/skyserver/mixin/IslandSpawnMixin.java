@@ -27,13 +27,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * generation, structure, patrol, reinforcement...), not just natural and chunk generation. The
  * expedition's own guards, boss, helpers and Captain Wren don't go through this check (they are
  * created directly), so they are not affected.
+ *
+ * 5.18b: the two End Expedition worlds refuse every spawn-rule check as well.
  */
 @Mixin(SpawnPlacements.class)
 public class IslandSpawnMixin {
     @Inject(method = "checkSpawnRules", at = @At("HEAD"), cancellable = true)
     private static void skyserver$noNaturalIslandSpawns(EntityType<?> type, ServerLevelAccessor level, EntitySpawnReason reason, BlockPos pos,
                                                         RandomSource random, CallbackInfoReturnable<Boolean> cir) {
-        if (Expedition.isExpedition(level.getLevel())
+        if (Expedition.isExpedition(level.getLevel()) || com.aidan.skyserver.expedition.EndExpedition.isEnd(level.getLevel()) // 5.18b: both End worlds too
                 || ((reason == EntitySpawnReason.NATURAL || reason == EntitySpawnReason.CHUNK_GENERATION) && Islands.isIsland(level.getLevel()))) {
             cir.setReturnValue(false);
         }
