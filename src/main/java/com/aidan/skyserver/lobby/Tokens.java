@@ -25,6 +25,8 @@ import java.util.*;
 public final class Tokens {
     public static final String SHARDS = "shards", UPGRADE_VOUCHER = "upgrade_voucher", THEME = "theme";
     public static final String[] TICKET = {"ticket_0", "ticket_1", "ticket_2", "ticket_3"};
+    /** 5.18: a free place on the End Expedition. */
+    public static final String END_TICKET = "ticket_end";
 
     private static final Map<UUID, Map<String, Integer>> DATA = new HashMap<>();
     private static boolean loaded = false;
@@ -113,6 +115,10 @@ public final class Tokens {
             case "theme" -> {
                 add(p.getUUID(), THEME, 1);
                 return "§aIsland Theme §7(change your island's look: §e/is theme§7)";
+            }
+            case "endticket" -> {
+                add(p.getUUID(), END_TICKET, 1);
+                return "§5End Expedition Ticket §7(use it from §e/is §7- a free place on the End Expedition)";
             }
             case "ticket" -> {
                 int d = Integer.parseInt(t[1]);

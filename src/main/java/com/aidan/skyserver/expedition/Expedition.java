@@ -118,7 +118,7 @@ public final class Expedition {
     public static final long[] PRICES = {5_000, 10_000, 20_000, 40_000};
     /** Chest rooms per trip. */
     static final int[] ROOMS = {3, 4, 5, 6};
-    /** Guards in each wave for ONE player (5.17: multiplied by GUARD_MULT for the crew). */
+    /** Guards in each wave for ONE player (5.18: each extra player adds CREW_EXTRA_GUARDS to every wave but the last). */
     static final int[][] WAVES = {{3, 4, 5}, {4, 5, 6}, {4, 5, 6, 7}, {5, 6, 7, 8}};
     /** Seconds until the next wave comes anyway (Ambush arenas: 5 fewer). */
     static final int[] WAVE_SECONDS = {40, 40, 40, 40};
@@ -130,11 +130,18 @@ public final class Expedition {
     static final double[] CAPTAIN_HEALTH = {2.0, 2.5, 3.0, 3.5};
     /** 5.17 crew scaling, by crew size (1, 2, 3 players). */
     static final int CREW_MAX = 3;
-    static final double[] GUARD_MULT = {1.0, 2.0, 2.5}, TIME_MULT = {1.0, 1.25, 1.4};
+    static final double[] TIME_MULT = {1.0, 1.25, 1.4};
+    /**
+     * 5.18 crew scaling, for EACH extra player: this many more guards in every wave except the last (the
+     * last wave gets an extra captain instead), this much more guard health and damage (0.70 = +70%), and
+     * this much longer until the next wave (0.25 = +25%). Captains and the boss are not touched by these.
+     */
+    static final int CREW_EXTRA_GUARDS = 1;
+    static final double CREW_HEALTH = 0.70, CREW_DAMAGE = 0.10, CREW_WAVE_TIME = 0.25;
     /** 5.17: the extra captain each extra player brings has this share of a captain's health. */
     static final double EXTRA_CAPTAIN_HEALTH = 0.75;
-    /** 5.17: most guards alive in one arena; the rest of a wave becomes extra health instead. */
-    static final int ROOM_GUARD_CAP = 24;
+    /** Most guards alive in one arena, by difficulty; the rest of a wave becomes extra health instead. */
+    static final int[] ROOM_GUARD_CAPS = {15, 15, 18, 24};
     /** 5.17: seconds the rest of the deck has to pay and join once the captain sets sail. */
     static final int MUSTER_SECONDS = 30;
     /** The old twist names (5.17: all twists are in ExpeditionTwists; kept so anything that reads these compiles). */
@@ -299,6 +306,7 @@ public final class Expedition {
     // =====================================================================
 
     public static void init() {
+        EndExpedition.init(); // 5.18: the End Expedition (its own listeners, registered first like ours)
         // Fresh Nether every start: delete the expedition world before it loads.
         ServerLifecycleEvents.SERVER_STARTING.register(s -> Safe.run("expedition wipe", () -> { try { wipe(s); } catch (java.io.IOException e) { Skyserver.LOGGER.warn("Couldn't wipe the Nether Expedition world: {}", e.toString()); } }));
         ServerLifecycleEvents.SERVER_STARTED.register(s -> {
@@ -509,8 +517,8 @@ public final class Expedition {
         public int run(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> c)
                 throws com.mojang.brigadier.exceptions.CommandSyntaxException {
             ServerPlayer p = c.getSource().getPlayer();
-            if (p != null && isExpedition(p.level())) {
-                c.getSource().sendFailure(Component.literal("You're on a Nether Expedition! Go back to Wren's Landing and talk to Captain Wren to go home."));
+            if (p != null && (isExpedition(p.level()) || EndExpedition.isEnd(p.level()))) {
+                c.getSource().sendFailure(Component.literal("You're on an expedition! Talk to Captain Wren to go home."));
                 return 0;
             }
             return inner.run(c);
@@ -954,7 +962,7 @@ public final class Expedition {
                     + "§eLeaving a fight locks your health until you go back in. §c§lIf you die, you lose everything you're carrying. §7Talk to §6Captain Wren §7here to go home. ("
                     + (run.timeLimit / 60) + " minutes)");
             Lobby.msg(m, "§7The §6Gold Trader §7here swaps gold ingots for goods. Once this trip, if you go down, you can §arevive §7for §6" + Economy.format(reviveCost(run)) + "§7."
-                    + (run.crewSize > 1 ? " §bCrew of " + run.crewSize + ": §7more guards, a stronger boss, everyone gets their own loot - and once per trip a teammate can pick a downed player up (crouch next to them for "
+                    + (run.crewSize > 1 ? " §bCrew of " + run.crewSize + ": §7one more guard a wave, tougher guards, a stronger boss, everyone gets their own loot - and once per trip a teammate can pick a downed player up (crouch next to them for "
                     + (TEAM_REVIVE_HOLD_TICKS / 20) + " seconds)." : ""));
         }
         if (run.inside.isEmpty()) endRun(run, "nobody came");
@@ -1310,6 +1318,14 @@ public final class Expedition {
         if (m == null) return null;
         gear(level, run, m, ranged);
         if (twist(r) == ExpeditionTwists.SWARM) scaleHealth(m, "exp_swarm", ExpeditionTwists.SWARM_HEALTH);
+        // 5.18: a crew's guards are tougher and hit harder for every extra player (captains are not).
+        int more = run.crewSize - 1;
+        if (more > 0) {
+            scaleHealth(m, "exp_crew", 1.0 + CREW_HEALTH * more);
+            AttributeInstance atk = m.getAttribute(Attributes.ATTACK_DAMAGE);
+            if (atk != null) atk.addPermanentModifier(new AttributeModifier(Identifier.fromNamespaceAndPath(Skyserver.MOD_ID, "exp_crew_damage"),
+                    CREW_DAMAGE * more, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+        }
         return m;
     }
 
@@ -1356,14 +1372,16 @@ public final class Expedition {
     /** Someone walked into a chest room for the first time: its guards wake. */
     private static void wakeRoom(ServerLevel level, Run run, ExpeditionRooms.Room r) {
         r.woke = true;
-        // 5.17: a twist this trip hasn't had yet; wave sizes multiplied for the crew (and for a Swarm).
+        // A twist this trip hasn't had yet. 5.18: every wave but the last gets one more guard per extra player
+        // (the last wave's extra captain is that wave's extra guard); a Swarm multiplies the result.
         int tw = ExpeditionTwists.pick(RNG, run.usedTwists);
         TWIST.put(r, tw);
-        double mult = GUARD_MULT[run.crewSize - 1] * (tw == ExpeditionTwists.SWARM ? ExpeditionTwists.SWARM_COUNT : 1.0);
+        double mult = tw == ExpeditionTwists.SWARM ? ExpeditionTwists.SWARM_COUNT : 1.0;
+        int extra = (run.crewSize - 1) * CREW_EXTRA_GUARDS;
         int[] base = WAVES[run.diff];
         r.waves = base.length;
         r.waveSizes = new int[r.waves];
-        for (int w = 0; w < r.waves; w++) r.waveSizes[w] = Math.max(1, (int) Math.round(base[w] * mult));
+        for (int w = 0; w < r.waves; w++) r.waveSizes[w] = Math.max(1, (int) Math.round((base[w] + (w < r.waves - 1 ? extra : 0)) * mult));
         r.wave = 0;
         for (ServerPlayer m : inside(run))
             if (r.inside(m.getX(), m.getY(), m.getZ(), 1)) Lobby.msg(m, ExpeditionTwists.NAMES[tw] + " arena! " + ExpeditionTwists.TIPS[tw] + "§7.");
@@ -1373,7 +1391,7 @@ public final class Expedition {
     /**
      * Sends the next wave into a room. Archers spawn up high; the first wave appears around the room
      * (Ambush: at every doorway), later ones come through the doorways. The wave after this one is due in
-     * WAVE_SECONDS whether this one is dead or not. 5.17: at most ROOM_GUARD_CAP guards alive at once - the
+     * WAVE_SECONDS (longer for a crew) whether this one is dead or not. At most ROOM_GUARD_CAPS guards alive at once - the
      * rest of the wave becomes extra health for the ones that came.
      */
     private static void nextWave(ServerLevel level, Run run, ExpeditionRooms.Room r) {
@@ -1384,7 +1402,7 @@ public final class Expedition {
         int tw = twist(r);
         int count = r.waveSizes[w];
         ExpeditionTwists.waveStarted(level, run, r, tw, RNG);
-        int spawn = Math.max(1, Math.min(count, ROOM_GUARD_CAP - guardsLeft(level, r)));
+        int spawn = Math.max(1, Math.min(count, ROOM_GUARD_CAPS[run.diff] - guardsLeft(level, r)));
         double pooled = count / (double) spawn;
         int offset = RNG.nextInt(8);
         boolean fromDoors = (w > 0 || tw == ExpeditionTwists.AMBUSH) && !r.doorsIn.isEmpty();
@@ -1402,7 +1420,10 @@ public final class Expedition {
         if (last) {
             captain(level, run, r, 1.0, true);
             for (int i = 1; i < run.crewSize; i++) captain(level, run, r, EXTRA_CAPTAIN_HEALTH, false);
-        } else WAVE_DUE.put(r, ticks + (WAVE_SECONDS[run.diff] - (tw == ExpeditionTwists.AMBUSH ? 5 : 0)) * 20L);
+        } else {
+            int gap = (int) Math.round(WAVE_SECONDS[run.diff] * (1.0 + CREW_WAVE_TIME * (run.crewSize - 1)));
+            WAVE_DUE.put(r, ticks + (gap - (tw == ExpeditionTwists.AMBUSH ? 5 : 0)) * 20L);
+        }
         level.playSound(null, r.floorCenter(), w == 0 ? SoundEvents.WITHER_SKELETON_AMBIENT : SoundEvents.RAVAGER_ROAR, SoundSource.HOSTILE, 1.5f, 0.7f);
         String sub = w == 0 ? (tw >= 0 ? ExpeditionTwists.NAMES[tw] + " §7- beat every wave to open the chest" : "§7Beat every wave to open the chest")
                 : last ? "§4The captain is here!" : "§7They're coming through the doorways!";

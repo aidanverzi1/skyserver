@@ -88,7 +88,7 @@ public final class Crates {
                     label = "§d" + n + " Key Shards §7(salvaged " + stripColor(prize.label()) + ")";
                 } else {
                     Mailbox.send(server, p.getUUID(), prize.item().apply(server));
-                    for (ItemStack extra : Loot.extras(prize)) Mailbox.send(server, p.getUUID(), extra);
+                    for (ItemStack extra : Loot.extras(prize, server)) Mailbox.send(server, p.getUUID(), extra);
                     where = " §7(delivered when you go to your Sky Island: §e/is§7)";
                 }
             }

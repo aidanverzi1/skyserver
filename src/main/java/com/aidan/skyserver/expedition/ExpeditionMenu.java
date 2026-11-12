@@ -171,8 +171,8 @@ public final class ExpeditionMenu {
                 List<String> lore = new ArrayList<>();
                 lore.add("§7Price: §6" + Economy.format(Expedition.PRICES[d]) + " §7each" + (owe == 0 ? " §a(yours is paid)" : " §7- you pay §6" + Economy.format(owe) + " §7more"));
                 lore.add("§7" + Expedition.ROOMS[d] + " chest rooms, then the boss arena");
-                lore.add("§7Waves of §f" + waves(d) + " §7guards §8(x2 with 2 players, x2.5 with 3)");
-                lore.add("§7Next wave every §f" + Expedition.WAVE_SECONDS[d] + "s§7, a §4captain §7leads the last");
+                lore.add("§7Waves of §f" + waves(d) + " §7guards §8(+1 per extra player, each +70% health)");
+                lore.add("§7Next wave every §f" + Expedition.WAVE_SECONDS[d] + "s §8(+25% per extra player)§7, a §4captain §7leads the last");
                 lore.add(GUARD_GEAR[d]);
                 lore.add("§7Every arena has a twist");
                 lore.add("§7Boss: §c" + Math.round(ExpeditionBoss.HP[d]) + "❤ §8(x1.75 with 2, x2.3 with 3)§7, enrages at §f" + mmss(ExpeditionBoss.ENRAGE_SECONDS[d]));

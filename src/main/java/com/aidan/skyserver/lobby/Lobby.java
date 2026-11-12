@@ -120,7 +120,8 @@ public final class Lobby {
      * inventory, so it's saved as one (and never mixed up with survival).
      */
     public static boolean isIsland(Level l) {
-        return com.aidan.skyserver.island.Islands.isIsland(l) || com.aidan.skyserver.expedition.Expedition.isExpedition(l);
+        return com.aidan.skyserver.island.Islands.isIsland(l) || com.aidan.skyserver.expedition.Expedition.isExpedition(l)
+                || com.aidan.skyserver.expedition.EndExpedition.isEnd(l); // 5.18
     }
 
     /** Survival is on hold for now (Sky Island is the main mode). Set to true to open it again. */

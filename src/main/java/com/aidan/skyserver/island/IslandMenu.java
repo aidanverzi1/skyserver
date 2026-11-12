@@ -15,7 +15,7 @@ import net.minecraft.world.item.Items;
 /** The /is menu: home, info, challenges, visitors, the upgrades, and (5.8) themes and Nether Expeditions. */
 public final class IslandMenu extends LockedMenu {
     private static final int HOME = 10, INFO = 12, CHALLENGES = 14, VISITORS = 16;
-    private static final int THEME = 20, EXPEDITION = 22, VOUCHERS = 24;
+    private static final int THEME = 20, EXPEDITION = 22, VOUCHERS = 24, END = 26;
     private static final int SIZE = 28, GEN = 30, CROPS = 32, EXTRA = 34, HELP = 40, SPEED = 39;
     private static final int[] EGG_SLOTS = {37, 38, 42, 43};
     private static final net.minecraft.world.item.Item[] EGGS = {Items.SHEEP_SPAWN_EGG, Items.COW_SPAWN_EGG, Items.CHICKEN_SPAWN_EGG, Items.PIG_SPAWN_EGG};
@@ -56,11 +56,13 @@ public final class IslandMenu extends LockedMenu {
                 "§7Change your island's biome: grass,", "§7leaves, water and sky colours.", "§7Theme tokens: §f" + themes + " §8(from Epic chests)",
                 themes > 0 ? "§eClick to pick a theme" : "§8You need a theme token"));
         box.setItem(EXPEDITION, com.aidan.skyserver.expedition.ExpeditionMenu.islandButton(viewer));
+        box.setItem(END, com.aidan.skyserver.expedition.EndExpedition.islandButton(viewer)); // 5.18
         box.setItem(VOUCHERS, Stacks.named(new ItemStack(Items.PAPER), "§d§lVouchers & Tickets",
                 "§7Upgrade vouchers (25% off): §f" + Tokens.count(viewer.getUUID(), Tokens.UPGRADE_VOUCHER),
                 "§8(used on your next upgrade below)",
                 "§7Expedition tickets: §aEasy " + Tokens.count(viewer.getUUID(), Tokens.TICKET[0]) + " §eNormal " + Tokens.count(viewer.getUUID(), Tokens.TICKET[1])
-                        + " §cHard " + Tokens.count(viewer.getUUID(), Tokens.TICKET[2]) + " §4Nightmare " + Tokens.count(viewer.getUUID(), Tokens.TICKET[3])));
+                        + " §cHard " + Tokens.count(viewer.getUUID(), Tokens.TICKET[2]) + " §4Nightmare " + Tokens.count(viewer.getUUID(), Tokens.TICKET[3]),
+                "§7End Expedition tickets: §5" + Tokens.count(viewer.getUUID(), Tokens.END_TICKET)));
 
         int step = (is.size - Islands.START_SIZE) / Islands.SIZE_STEP;
         boolean sizeMax = is.size >= Islands.MAX_SIZE;
@@ -109,6 +111,7 @@ public final class IslandMenu extends LockedMenu {
             }
             case THEME -> Lobby.later(viewer, () -> IslandThemes.open(viewer));
             case EXPEDITION -> Lobby.later(viewer, () -> com.aidan.skyserver.expedition.ExpeditionMenu.openSummon(viewer));
+            case END -> Lobby.later(viewer, () -> com.aidan.skyserver.expedition.EndExpedition.offer(viewer));
             case SIZE -> result = Islands.buySize(viewer, is);
             case GEN -> result = Islands.buyGenerator(viewer, is);
             case CROPS -> result = Islands.buyCrops(viewer, is);
