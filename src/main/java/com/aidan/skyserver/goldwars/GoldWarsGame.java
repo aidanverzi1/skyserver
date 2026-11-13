@@ -375,7 +375,7 @@ public final class GoldWarsGame {
         LiteralArgumentBuilder<CommandSourceStack> cmd = Commands.literal("class").executes(c -> {
             ServerPlayer p = c.getSource().getPlayerOrException();
             if (!players.containsKey(p.getUUID())) {
-                msg(p, "§cJoin first with /gw join.");
+                msg(p, "§cJoin first with /gw.");
                 return 0;
             }
             ClassMenu.open(p);
@@ -397,15 +397,15 @@ public final class GoldWarsGame {
     public static void join(ServerPlayer player) {
         UUID id = player.getUUID();
         if (players.containsKey(id)) {
-            msg(player, "§eYou're already in Gold Wars. Use /gw leave to quit.");
+            msg(player, "§eYou're already in Gold Wars. Use /leave to quit.");
             return;
         }
         if (SkywarsGame.isInGame(id)) {
-            msg(player, "§cLeave Skywars first with /sw leave.");
+            msg(player, "§cLeave Skywars first with /leave.");
             return;
         }
         if (com.aidan.skyserver.bedwars.BedwarsGame.isInGame(id)) {
-            msg(player, "§cLeave Bedwars first with /bw leave.");
+            msg(player, "§cLeave Bedwars first with /leave.");
             return;
         }
         if (com.aidan.skyserver.lobby.Lobby.level() != null && !com.aidan.skyserver.lobby.Lobby.isLobby(player.level())) {
@@ -451,7 +451,7 @@ public final class GoldWarsGame {
         broadcast("§a" + player.getName().getString() + " joined " + team.colored()
                 + " §a(" + players.size() + "/" + (MAX_PER_TEAM * 2) + ")");
         msg(player, "§eMap: §f" + GoldWarsMap.current().display
-                + "§e. Right-click the nether star or use §f/gw class §eto choose your class.");
+                + "§e. Right-click the nether star or use §f/class §e(or §f/builder§e, §f/knight§e, §f/archer§e...) to choose your class.");
         if (state == State.WAITING || state == State.COUNTDOWN) VOTE.offer(player, GoldWarsMap.current().ordinal());
         com.aidan.skyserver.lobby.Parties.followLeader(player, "goldwars");
 
@@ -773,7 +773,7 @@ public final class GoldWarsGame {
     static boolean chooseClass(ServerPlayer player, GwClass cls) {
         GwPlayer gp = players.get(player.getUUID());
         if (gp == null) {
-            msg(player, "§cJoin first with /gw join.");
+            msg(player, "§cJoin first with /gw.");
             return false;
         }
         if (classFull(gp, cls) && !(!gp.bot && bumpBotFromClass(gp.team, cls))) {
@@ -1261,7 +1261,7 @@ public final class GoldWarsGame {
         resetVitals(player);
         gp.respawnAt = ticks + RESPAWN_SECONDS * 20L;
         gp.lastAttacker = null;
-        msg(player, "§eRespawning in " + RESPAWN_SECONDS + " seconds. §7Change class with /gw class.");
+        msg(player, "§eRespawning in " + RESPAWN_SECONDS + " seconds. §7Change class with /class (or /builder, /knight...).");
     }
 
     private static void respawn(ServerPlayer player, GwPlayer gp) {

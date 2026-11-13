@@ -72,10 +72,10 @@ import java.util.*;
 /**
  * The Nether Expedition, a paid co-op minigame that starts on your Sky Island (5.8; reworked 5.9 - 5.17).
  *
- *  1. /is menu -> Nether Expedition: pay the $5,000 deposit (or use a ticket). Captain Wren's airship
- *     arrives in empty sky above the island (ExpeditionShip).
- *  2. Gear up with your OWN armor, weapons and food, then board (right-click the rope, or talk to Wren by the path).
- *  3. Right-click Wren on the deck: pick the difficulty (the deposit counts toward the price) and
+ *  1. 5.20: talk to Captain Wren in his ship room -> Nether Expedition: pay the $5,000 deposit (or use a
+ *     ticket). (5.8 - 5.19 an airship came to the island; it's gone - the crew gathers in the ship room.)
+ *  2. Gear up with your OWN armor, weapons and food. Faction mates come to the room with /expedition board.
+ *  3. Pick the difficulty at Wren's helm menu (the deposit counts toward the price) and
  *     Fortress / Bastion / Surprise, read the warning, set sail.
  *  4. Wren flies you (~10 seconds while the map is built) to a custom arena map floating over a lava sea
  *     (ExpeditionRooms): Wren's Landing in the middle (safe, unbreakable, no mobs; talk to Wren there to go
@@ -293,6 +293,11 @@ public final class Expedition {
         return server == null ? null : server.getLevel(DIM);
     }
 
+    /** 5.20: sameFaction for other packages (the ship room). */
+    public static boolean sameFactionPublic(UUID a, UUID b) {
+        return sameFaction(a, b);
+    }
+
     /** 5.17: are these two players in the same faction? */
     static boolean sameFaction(UUID a, UUID b) {
         if (a == null || b == null) return false;
@@ -307,6 +312,10 @@ public final class Expedition {
 
     public static void init() {
         EndExpedition.init(); // 5.18: the End Expedition (its own listeners, registered first like ours)
+        ExpeditionGold.init(); // 5.19: the 5 trapped gold blocks on the bridges
+        AncientCity.init();    // 5.19: the Ancient City Expedition (registered before Lobby, like the End)
+        SunkenMonument.init(); // 5.20: the Sunken Monument Expedition
+        com.aidan.skyserver.island.WrenRoom.init(); // 5.20: Captain Wren's ship room (before Islands' own handlers)
         // Fresh Nether every start: delete the expedition world before it loads.
         ServerLifecycleEvents.SERVER_STARTING.register(s -> Safe.run("expedition wipe", () -> { try { wipe(s); } catch (java.io.IOException e) { Skyserver.LOGGER.warn("Couldn't wipe the Nether Expedition world: {}", e.toString()); } }));
         ServerLifecycleEvents.SERVER_STARTED.register(s -> {
@@ -473,9 +482,21 @@ public final class Expedition {
     }
 
     /** Is this mob one of the expedition's own (a recorded or tagged guard / boss / helper, Captain Wren, or the gold trader)? */
+    /** 5.19: the map of the trip this player is on (null if none, or still being planned). */
+    static ExpeditionRooms.Layout layoutOf(ServerPlayer p) {
+        Run run = PLAYER_RUN.get(p.getUUID());
+        return run == null ? null : run.layout;
+    }
+
+    /** 5.19: the difficulty of the trip this player is on, or -1. */
+    static int diffOf(ServerPlayer p) {
+        Run run = PLAYER_RUN.get(p.getUUID());
+        return run == null ? -1 : run.diff;
+    }
+
     private static boolean ours(Mob m) {
         return GUARD_OF.containsKey(m.getUUID()) || m.entityTags().contains(GUARD_TAG) || m.entityTags().contains(NETHER_WREN_TAG)
-                || m.entityTags().contains(ExpeditionBarter.PIGLIN_TAG);
+                || m.entityTags().contains(ExpeditionBarter.PIGLIN_TAG) || m.entityTags().contains(ExpeditionGold.TRAP_TAG);
     }
 
     /** Takes a mob that isn't ours out of the expedition world and says so in the log (first STRAY_LOG_LIMIT only). */
@@ -517,7 +538,7 @@ public final class Expedition {
         public int run(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> c)
                 throws com.mojang.brigadier.exceptions.CommandSyntaxException {
             ServerPlayer p = c.getSource().getPlayer();
-            if (p != null && (isExpedition(p.level()) || EndExpedition.isEnd(p.level()))) {
+            if (p != null && (isExpedition(p.level()) || EndExpedition.isEnd(p.level()) || AncientCity.isCity(p.level()) || SunkenMonument.isSunken(p.level()))) {
                 c.getSource().sendFailure(Component.literal("You're on an expedition! Talk to Captain Wren to go home."));
                 return 0;
             }
@@ -553,36 +574,35 @@ public final class Expedition {
     // Calling the airship, boarding
     // =====================================================================
 
-    /** /is menu -> Nether Expedition. ticket = difficulty of the ticket to use, or -1 to pay the deposit. */
-    public static void summon(ServerPlayer p, int ticket) {
+    /**
+     * Talk to Wren -> Nether Expedition (or /expedition call): pay the deposit or use a ticket, then the helm
+     * menu opens. ticket = difficulty of the ticket to use, or -1 to pay the deposit. 5.20: no airship - the
+     * crew gathers in Captain Wren's ship room. True if the deposit / ticket was taken.
+     */
+    public static boolean summon(ServerPlayer p, int ticket) {
         Islands.Island is = Islands.islandOf(p.getUUID());
         if (is == null || !Islands.isIsland(p.level()) || Islands.islandAt(p.getX(), p.getZ()) != is) {
-            Lobby.msg(p, "§cStand on your own Sky Island to call Captain Wren's airship.");
-            return;
+            Lobby.msg(p, "§cTalk to Captain Wren on your own Sky Island to start a Nether Expedition.");
+            return false;
         }
         if (SHIPS.containsKey(is.id)) {
-            Lobby.msg(p, "§7The airship is already here! §eRight-click its rope §7or talk to Wren by the path to board.");
-            return;
+            Lobby.msg(p, "§7Your crew is already getting ready - talk to Captain Wren to choose a difficulty.");
+            return false;
         }
         if (level() == null) {
             Lobby.msg(p, "§cThe Nether Expedition world didn't load - tell an admin.");
-            return;
+            return false;
         }
         if (ticket >= 0) {
             if (!Tokens.take(p.getUUID(), Tokens.TICKET[ticket], 1)) {
                 Lobby.msg(p, "§cYou don't have a " + DIFF_NAMES[ticket] + " ticket.");
-                return;
+                return false;
             }
         } else if (!Economy.take(server, p.getUUID(), PRICES[0])) {
-            Lobby.msg(p, "§cCalling the airship takes a " + Economy.format(PRICES[0]) + " deposit (it counts toward the trip).");
-            return;
+            Lobby.msg(p, "§cA Nether Expedition takes a " + Economy.format(PRICES[0]) + " deposit (it counts toward the trip).");
+            return false;
         }
         ExpeditionShip.Ship ship = ExpeditionShip.place(Islands.level(), is);
-        if (ship == null) {
-            refund(p.getUUID(), ticket);
-            Lobby.msg(p, "§cWren couldn't find open sky above your island to park the airship. §7(It needs about 21 x 11 blocks of empty air above your builds.)");
-            return;
-        }
         SHIPS.put(is.id, ship);
         Pending pd = new Pending();
         pd.payer = p.getUUID();
@@ -590,20 +610,22 @@ public final class Expedition {
         pd.since = ticks;
         PENDING.put(is.id, pd);
         p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.BELL_BLOCK, SoundSource.PLAYERS, 1.5f, 0.8f);
-        Islands.islandChat(is, "§6§l⚓ Captain Wren's airship has arrived above the island!");
+        Islands.islandChat(is, "§6§l⚓ " + p.getName().getString() + " is getting a Nether Expedition ready in Captain Wren's ship room!");
         for (ServerPlayer m : islandOnline(is)) {
+            if (m == p) continue;
             m.sendSystemMessage(Component.literal("§7Put on your §farmor§7, bring §fweapons and food§7, then ")
-                    .append(button("§a§l[Board the airship]", "/expedition board", "Climb aboard (or right-click the rope)")));
+                    .append(button("§a§l[Go to the ship room]", "/expedition board", "Join the crew in Captain Wren's ship room")));
         }
         // 5.17: faction mates can come along (each pays for their own place).
         for (ServerPlayer m : server.getPlayerList().getPlayers()) {
             if (m instanceof BotPlayer || is.isMember(m.getUUID()) || !sameFaction(p.getUUID(), m.getUUID())) continue;
-            m.sendSystemMessage(Component.literal("§9" + p.getName().getString() + " §7called Captain Wren's airship. Up to " + CREW_MAX
+            m.sendSystemMessage(Component.literal("§9" + p.getName().getString() + " §7is getting a Nether Expedition ready. Up to " + CREW_MAX
                             + " can sail, each paying their own way. Go to your island (§e/is§7), gear up, then ")
-                    .append(button("§a§l[Board their airship]", "/expedition board", "Join your faction mate's crew")));
+                    .append(button("§a§l[Go to their ship room]", "/expedition board", "Join your faction mate's crew")));
         }
         Lobby.msg(p, "§7" + (ticket >= 0 ? "Your " + DIFF_NAMES[ticket] + " ticket pays for the trip." : "Your " + Economy.format(PRICES[0]) + " deposit counts toward the trip.")
-                + " The airship waits " + (SHIP_WAIT_SECONDS / 60) + " minutes; if nobody sets sail it leaves and you get it back.");
+                + " Wren waits " + (SHIP_WAIT_SECONDS / 60) + " minutes; if nobody sets sail you get it back.");
+        return true;
     }
 
     private static void refund(UUID id, int ticket) {
@@ -614,10 +636,9 @@ public final class Expedition {
         }
     }
 
-    /** Wren by the path, when the airship is here. */
+    /** Kept for old callers: a Nether crew is getting ready - to the helm menu. */
     public static void offerBoard(ServerPlayer p) {
-        Lobby.msg(p, "§6[Captain Wren] §fShe's patched up and ready to fly! Gear up - armor, a good blade, some food - and come aboard.");
-        p.sendSystemMessage(Component.literal(" ").append(button("§a§l[Board the airship]", "/expedition board", "Climb aboard")));
+        ExpeditionMenu.open(p);
     }
 
     /** Onto the deck (the rope, Wren by the path, or /expedition board). 5.17: your island's airship, or a faction mate's. */
@@ -637,11 +658,11 @@ public final class Expedition {
             }
         }
         if (ship == null) {
-            Lobby.msg(p, "§7There's no airship waiting for you. §7Call one from §e/is §7-> Nether Expedition (or ask a faction mate to).");
+            Lobby.msg(p, "§7No Nether crew is getting ready for you. §7Talk to Captain Wren in your ship room (§e/is shiproom§7) to start one.");
             return;
         }
         if (!Islands.isIsland(p.level())) {
-            Lobby.msg(p, "§cGo to your island first (§e/is§c), then board.");
+            Lobby.msg(p, "§cGo to your island first (§e/is§c), then join.");
             return;
         }
         if (running(is)) {
@@ -653,8 +674,8 @@ public final class Expedition {
         p.resetFallDistance();
         if (!is.isMember(p.getUUID())) Islands.sendBorder(p, is);
         Lobby.msg(p, is.isMember(p.getUUID())
-                ? "§6You're aboard! §7Right-click §6Captain Wren §7at the helm to choose a difficulty and set sail. §8(/expedition leaveship to go back down)"
-                : "§6You're aboard! §7When the captain sets sail you'll be asked to pay for your place. §8(/expedition leaveship to go home)");
+                ? "§6You're in the ship room! §7Talk to §6Captain Wren §7to choose a difficulty and set sail."
+                : "§6You're in the ship room! §7When the captain sets sail you'll be asked to pay for your place. §8(/expedition leaveship to go home)");
     }
 
     /** The island whose airship deck this player is standing on, or null. */
@@ -675,7 +696,7 @@ public final class Expedition {
     static void leaveShip(ServerPlayer p) {
         Islands.Island deck = deckIsland(p);
         if (deck == null) {
-            Lobby.msg(p, "§7You're not on the airship.");
+            Lobby.msg(p, "§7You're not in a Nether crew's ship room.");
             return;
         }
         sendHome(p, deck);
@@ -714,12 +735,12 @@ public final class Expedition {
         ExpeditionShip.Ship ship = shipOf(is);
         if (is == null || pd == null || ship == null || pd.sailing || running(is)) return;
         if (pd.diff >= 0) {
-            Lobby.msg(leader, "§7The crew is already paying up - the airship sails in a moment.");
+            Lobby.msg(leader, "§7The crew is already paying up - you sail in a moment.");
             return;
         }
         List<ServerPlayer> deck = crewOnDeck(is);
         if (!deck.contains(leader)) {
-            Lobby.msg(leader, "§cStand on the deck to set sail.");
+            Lobby.msg(leader, "§cStand in Captain Wren's ship room to set sail.");
             return;
         }
         long owe = owed(pd, diff);
@@ -761,7 +782,7 @@ public final class Expedition {
         Islands.Island is = deckIsland(p);
         Pending pd = pendingOf(is);
         if (pd == null || pd.diff < 0 || pd.sailing) {
-            Lobby.msg(p, "§7Nobody is setting sail right now. Board the airship and wait for the captain.");
+            Lobby.msg(p, "§7Nobody is setting sail right now. Go to the ship room and wait for the captain.");
             return;
         }
         UUID id = p.getUUID();
@@ -865,11 +886,11 @@ public final class Expedition {
             Lobby.msg(leader, "§cWren couldn't find a safe place to land this time - try again.");
             return;
         }
-        // Whoever else is on the deck didn't pay: they stay behind.
+        // Whoever else is in the room didn't pay: they stay behind (visitors from other islands go home).
         for (ServerPlayer m : deck) {
             if (crew.contains(m)) continue;
             Lobby.msg(m, "§6[Captain Wren] §fNo fare, no flight! §7You stay behind this time.");
-            sendHome(m, is);
+            if (!is.isMember(m.getUUID())) sendHome(m, is);
         }
         PENDING.remove(is.id);
     }
@@ -1041,7 +1062,7 @@ public final class Expedition {
         Lobby.msg(p, "§6[Captain Wren] §fBack already, captain? " + (run.bossDead ? "That's the Vault cleaned out - fine work!"
                 : "There's still loot out there: " + run.cleared + " of " + run.layout.rooms.size() + " rooms cleared."));
         p.sendSystemMessage(Component.literal("§fShall I take you home? ")
-                .append(button("§a§l[Yes, take me home]", "/expedition leave", "Back to the airship with everything you carry"))
+                .append(button("§a§l[Yes, take me home]", "/expedition leave", "Back to the ship room with everything you carry"))
                 .append(Component.literal(" "))
                 .append(button("§c§l[No, not yet]", "/expedition stay", "Keep exploring"))
                 .append(Component.literal(" "))
@@ -1662,6 +1683,7 @@ public final class Expedition {
                 }
             }
             PlayerStats.add(m, "expedition_win", 1);
+            com.aidan.skyserver.lobby.Charts.stamp(m, "nether_" + d); // 5.19: Wren's Charts
             Lobby.msg(m, got + " §7- and your own share in the vault chest in the arena. §eTalk to Captain Wren in Wren's Landing §7when you're ready to go home.");
         }
         server.getPlayerList().broadcastSystemMessage(Component.literal("§6§l⚔ §e" + names(in) + " §7beat a " + DIFF_COLORS[d] + DIFF_NAMES[d]
@@ -1687,7 +1709,7 @@ public final class Expedition {
                     + (int) Math.sqrt(p.distanceToSqr(run.landing.getX(), run.landing.getY(), run.landing.getZ())) + " blocks away).");
             return;
         }
-        extract(p, run, "§6Captain Wren hauls you back aboard the airship.");
+        extract(p, run, "§6Captain Wren brings you back to his ship room.");
     }
 
     /** Home safely with everything carried: onto the deck (or the island home if the ship is gone). */
@@ -2041,7 +2063,7 @@ public final class Expedition {
             }
         }
         Islands.Island is = islandById(run.islandId);
-        if (is != null) Islands.islandChat(is, "§6[Captain Wren] §fThat's the crew home (" + why + "). Weighing anchor in 20 seconds - step off the deck!");
+        if (is != null) Islands.islandChat(is, "§6[Captain Wren] §fThat's the crew home (" + why + ").");
         Lobby.runLaterTicks(20 * 20, () -> departShip(run.islandId));
         Skyserver.LOGGER.info("Nether Expedition on island {} over: {}", run.islandId, why);
     }
@@ -2054,10 +2076,7 @@ public final class Expedition {
         Islands.Island is = islandById(islandId);
         if (pd != null && pd.diff >= 0 && !pd.sailing) cancelMuster(null, pd, null);
         if (ship == null) return;
-        for (ServerPlayer p : ship.level.players())
-            if (ship.onDeck(p.getX(), p.getY(), p.getZ())) sendHome(p, is);
         ExpeditionShip.remove(ship);
-        if (is != null) Islands.islandChat(is, "§7Captain Wren's airship sails off into the clouds.");
     }
 
     private static void shutdown() {
@@ -2154,7 +2173,7 @@ public final class Expedition {
             if (ticks - pd.since >= SHIP_WAIT_SECONDS * 20L) {
                 PENDING.remove(e.getKey());
                 refund(pd.payer, pd.ticket);
-                if (is != null) Islands.islandChat(is, "§6[Captain Wren] §fNobody's coming? I'll be off then - your " + (pd.ticket >= 0 ? "ticket" : "deposit") + " is back.");
+                if (is != null) Islands.islandChat(is, "§6[Captain Wren] §fNobody's sailing to the Nether? Your " + (pd.ticket >= 0 ? "ticket" : "deposit") + " is back.");
                 departShip(e.getKey());
             }
         }
@@ -2178,7 +2197,7 @@ public final class Expedition {
         // Only our own mobs live on the map - anything else that turns up goes (the safety net; it logs too).
         for (Mob mob : nl.getEntitiesOfClass(Mob.class, new AABB(run.cx - run.half, ExpeditionRooms.SEA_Y - 10, run.cz - run.half,
                 run.cx + run.half, 200, run.cz + run.half), m -> !GUARD_OF.containsKey(m.getUUID()) && !m.entityTags().contains(NETHER_WREN_TAG)
-                && !m.entityTags().contains(ExpeditionBarter.PIGLIN_TAG)))
+                && !m.entityTags().contains(ExpeditionBarter.PIGLIN_TAG) && !m.entityTags().contains(ExpeditionGold.TRAP_TAG)))
             removeStray(mob, mob.entityTags().contains(GUARD_TAG) ? "an old guard nobody owns, found by the sweep" : "found by the sweep");
         // Guards can't get into Wren's Landing either.
         ExpeditionRooms.Room sp = lay.spawn;
@@ -2413,10 +2432,10 @@ public final class Expedition {
 
     static void status(ServerPlayer p) {
         Lobby.msg(p, "§c§lNETHER EXPEDITIONS §7- a paid co-op trip (up to " + CREW_MAX + ") to a Nether Fortress or Bastion.");
-        Lobby.msg(p, "§7Call Captain Wren's airship from §e/is §7-> Nether Expedition (or §e/expedition call§7). Prices, per player: "
+        Lobby.msg(p, "§7Talk to Captain Wren in his ship room (§e/is shiproom§7) -> Nether Expedition (or §e/expedition call§7). Prices, per player: "
                 + DIFF_COLORS[0] + "Easy " + Economy.format(PRICES[0]) + "§7, " + DIFF_COLORS[1] + "Normal " + Economy.format(PRICES[1]) + "§7, "
                 + DIFF_COLORS[2] + "Hard " + Economy.format(PRICES[2]) + "§7, " + DIFF_COLORS[3] + "Nightmare " + Economy.format(PRICES[3]) + "§7.");
-        Lobby.msg(p, "§7Island members and faction mates can come (§e/expedition board§7): everyone pays for their own place and gets their own loot and rewards.");
+        Lobby.msg(p, "§7Island members and faction mates can come (§e/expedition board §7takes you to the ship room): everyone pays for their own place and gets their own loot and rewards.");
         Lobby.msg(p, "§7Bring your own gear - §cdiamond armor and golden apples are a must, even on Easy. §cDying loses everything you carry. §7Talk to Captain Wren in Wren's Landing to go home with your loot.");
         Run run = PLAYER_RUN.get(p.getUUID());
         if (run != null) Lobby.msg(p, "§eYou're on a " + DIFF_NAMES[run.diff] + " expedition: rooms cleared " + run.cleared + "/" + run.layout.rooms.size()

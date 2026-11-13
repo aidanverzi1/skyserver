@@ -29,6 +29,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * created directly), so they are not affected.
  *
  * 5.18b: the two End Expedition worlds refuse every spawn-rule check as well.
+ * 5.20: and the Sunken Monument world.
  */
 @Mixin(SpawnPlacements.class)
 public class IslandSpawnMixin {
@@ -36,6 +37,7 @@ public class IslandSpawnMixin {
     private static void skyserver$noNaturalIslandSpawns(EntityType<?> type, ServerLevelAccessor level, EntitySpawnReason reason, BlockPos pos,
                                                         RandomSource random, CallbackInfoReturnable<Boolean> cir) {
         if (Expedition.isExpedition(level.getLevel()) || com.aidan.skyserver.expedition.EndExpedition.isEnd(level.getLevel()) // 5.18b: both End worlds too
+                || com.aidan.skyserver.expedition.SunkenMonument.isSunken(level.getLevel()) // 5.20: the Sunken Monument
                 || ((reason == EntitySpawnReason.NATURAL || reason == EntitySpawnReason.CHUNK_GENERATION) && Islands.isIsland(level.getLevel()))) {
             cir.setReturnValue(false);
         }

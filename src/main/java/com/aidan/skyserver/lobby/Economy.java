@@ -207,6 +207,11 @@ public final class Economy {
         return out;
     }
 
+    /** 5.20: never bought by the shop (Sunken Monument treasures, so the expedition can't be farmed for cash). */
+    public static final java.util.Set<String> UNSELLABLE = java.util.Set.of("minecraft:heart_of_the_sea", "minecraft:conduit",
+            "minecraft:tide_armor_trim_smithing_template", "minecraft:nautilus_shell", "minecraft:sea_lantern", "minecraft:sponge",
+            "minecraft:wet_sponge", "minecraft:trident");
+
     /** Wraps /sell: refuses an item that hit its daily cap, and counts what was sold. */
     private record SellCapped(com.mojang.brigadier.Command<net.minecraft.commands.CommandSourceStack> inner)
             implements com.mojang.brigadier.Command<net.minecraft.commands.CommandSourceStack> {
@@ -215,6 +220,34 @@ public final class Economy {
                 throws com.mojang.brigadier.exceptions.CommandSyntaxException {
             ServerPlayer p = c.getSource().getPlayer();
             if (p == null) return inner.run(c);
+            // 5.20: Sunken Monument treasures can't be sold to the shop at all: they're set aside while /sell runs.
+            ItemStack heldNow = p.getMainHandItem();
+            if (!heldNow.isEmpty() && UNSELLABLE.contains(BuiltInRegistries.ITEM.getKey(heldNow.getItem()).toString())) {
+                c.getSource().sendFailure(net.minecraft.network.chat.Component.literal(heldNow.getHoverName().getString()
+                        + " can't be sold to the shop. Trade it to players with /shop or /orders instead."));
+                return 0;
+            }
+            Map<Integer, ItemStack> hidden = new HashMap<>();
+            Inventory hinv = p.getInventory();
+            for (int i = 0; i < hinv.getContainerSize(); i++) {
+                ItemStack st = hinv.getItem(i);
+                if (!st.isEmpty() && UNSELLABLE.contains(BuiltInRegistries.ITEM.getKey(st.getItem()).toString())) {
+                    hidden.put(i, st.copy());
+                    hinv.setItem(i, ItemStack.EMPTY);
+                }
+            }
+            try {
+                return capped(c, p);
+            } finally {
+                for (Map.Entry<Integer, ItemStack> h : hidden.entrySet()) {
+                    if (hinv.getItem(h.getKey()).isEmpty()) hinv.setItem(h.getKey(), h.getValue());
+                    else if (!hinv.add(h.getValue()) || !h.getValue().isEmpty()) p.drop(h.getValue(), false, net.minecraft.util.Prediction.SERVER_ONLY);
+                }
+            }
+        }
+
+        private int capped(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> c, ServerPlayer p)
+                throws com.mojang.brigadier.exceptions.CommandSyntaxException {
             loadCaps();
             rollDay();
             ItemStack held = p.getMainHandItem();

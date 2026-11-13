@@ -15,8 +15,8 @@ import java.util.List;
 
 /**
  * The Nether Expedition menus.
- *  - CallMenu (from /is): call the airship with the deposit or a ticket.
- *  - HelmMenu (right-click Wren on the deck): Fortress / Bastion / Surprise and the difficulty.
+ *  - CallMenu (Wren's menu, or /expedition call): the deposit or a ticket (5.20: no airship any more).
+ *  - HelmMenu (opens right after, or talk to Wren again): Fortress / Bastion / Surprise and the difficulty.
  *  - WarningMenu: "you lose everything you carry if you die" - confirm to set sail.
  * 5.17: the text matches co-op (everyone pays for their own place and gets their own rewards, crew
  * scaling, the teammate pick-up), the easier boss and the twists.
@@ -63,7 +63,7 @@ public final class ExpeditionMenu {
     public static ItemStack islandButton(ServerPlayer p) {
         Islands.Island is = Islands.islandOf(p.getUUID());
         String state = is == null ? "" : Expedition.running(is) ? "§eYour crew is in the Nether right now!"
-                : Expedition.hasShip(is) ? "§aThe airship is waiting - board it!" : "§eClick to call the airship";
+                : Expedition.hasShip(is) ? "§aYour crew is getting ready - pick a difficulty!" : "§eClick to start one";
         return Stacks.named(new ItemStack(Items.NETHERRACK), "§c§lNether Expedition",
                 "§7Captain Wren flies you and up to 2 island", "§7or faction mates to a Fortress or Bastion.",
                 "§7Clear the guarded chest rooms, then", "§7beat the boss for the Treasure Vault.",
@@ -79,10 +79,10 @@ public final class ExpeditionMenu {
         }
         if (Expedition.hasShip(is)) {
             if (Expedition.running(is)) Lobby.msg(p, "§7Your crew is on an expedition right now.");
-            else Expedition.board(p);
+            else open(p);
             return;
         }
-        LockedMenu.open(p, "§8Call Captain Wren's airship", 3, CallMenu::new);
+        LockedMenu.open(p, "§8Nether Expedition", 3, CallMenu::new);
     }
 
     /** Right-click Wren at the helm. */
@@ -90,7 +90,7 @@ public final class ExpeditionMenu {
         Islands.Island at = Islands.islandAt(p.getX(), p.getZ());
         Islands.Island own = Islands.islandOf(p.getUUID());
         if (at == null || own != at) {
-            Lobby.msg(p, "§6[Captain Wren] §fAhoy! Only this island's crew can take the helm. §7When the captain sets sail you'll be asked to pay for your place.");
+            Lobby.msg(p, "§6[Captain Wren] §fAhoy! Only this island's crew can choose the course. §7When the captain sets sail you'll be asked to pay for your place.");
             return;
         }
         Expedition.Pending pd = Expedition.pendingOf(own);
@@ -110,20 +110,20 @@ public final class ExpeditionMenu {
 
         CallMenu(int id, Inventory inv, SimpleContainer box, ServerPlayer viewer) {
             super(id, inv, box, 3, viewer);
-            box.setItem(DEPOSIT, Stacks.named(new ItemStack(Items.GOLD_INGOT), "§6§lCall the airship",
+            box.setItem(DEPOSIT, Stacks.named(new ItemStack(Items.GOLD_INGOT), "§6§lStart a Nether Expedition",
                     "§7Deposit: §6" + Economy.format(Expedition.PRICES[0]) + " §7(counts toward your place)",
                     "§7Pick the difficulty on board:",
                     "§aEasy " + Economy.format(Expedition.PRICES[0]) + " §7| §eNormal " + Economy.format(Expedition.PRICES[1]),
                     "§cHard " + Economy.format(Expedition.PRICES[2]) + " §7| §4Nightmare " + Economy.format(Expedition.PRICES[3]),
                     "§7Up to " + Expedition.CREW_MAX + " can sail (island or faction mates).",
                     "§7Everyone pays for their own place.",
-                    "§7If nobody sets sail in 10 minutes,", "§7the airship leaves and you get it back.", "§eClick to call"));
+                    "§7If nobody sets sail in 10 minutes,", "§7you get it back.", "§eClick to start"));
             for (int d = 0; d < 4; d++) {
                 int have = Tokens.count(viewer.getUUID(), Tokens.TICKET[d]);
                 box.setItem(TICKETS[d], Stacks.named(new ItemStack(Items.MAP, Math.max(1, Math.min(64, have))),
                         Expedition.DIFF_COLORS[d] + "Use a " + Expedition.DIFF_NAMES[d] + " Ticket", "§7You have: §f" + have,
                         "§7Pays for your place on a " + Expedition.DIFF_NAMES[d] + " trip", "§7(or any easier one).", "§7Harder ones cost the difference.",
-                        have > 0 ? "§eClick to call with it" : "§8From Rare / Epic / Legendary chests"));
+                        have > 0 ? "§eClick to start with it" : "§8From Rare / Epic / Legendary chests"));
             }
             box.setItem(22, Stacks.named(new ItemStack(Items.SHIELD), "§fBefore you go",
                     "§7Wear your own armor, bring weapons,", "§7food, blocks and torches.",
@@ -138,14 +138,14 @@ public final class ExpeditionMenu {
         protected void onClick(int slot, int button, boolean shift) {
             if (slot == DEPOSIT) {
                 viewer.closeContainer();
-                Lobby.later(viewer, () -> Expedition.summon(viewer, -1));
+                Lobby.later(viewer, () -> { if (Expedition.summon(viewer, -1)) ExpeditionMenu.open(viewer); });
                 return;
             }
             for (int d = 0; d < 4; d++) {
                 if (slot != TICKETS[d] || Tokens.count(viewer.getUUID(), Tokens.TICKET[d]) <= 0) continue;
                 final int dd = d;
                 viewer.closeContainer();
-                Lobby.later(viewer, () -> Expedition.summon(viewer, dd));
+                Lobby.later(viewer, () -> { if (Expedition.summon(viewer, dd)) ExpeditionMenu.open(viewer); });
             }
         }
     }
@@ -189,7 +189,7 @@ public final class ExpeditionMenu {
             String[] st = {"§4Nether Fortress §7(blazes, wither skeletons)", "§6Bastion Remnant §7(piglins, brutes, hoglins)", "§dSurprise me! §7(either one)"};
             box.setItem(STRUCTURE, Stacks.named(new ItemStack(pd.structure == 0 ? Items.NETHER_BRICKS : pd.structure == 1 ? Items.GILDED_BLACKSTONE : Items.COMPASS),
                     "§fDestination: " + st[pd.structure], "§eClick to change"));
-            List<String> crew = new ArrayList<>(List.of("§7On the deck now (island and faction mates).", "§7When you set sail they get " + Expedition.MUSTER_SECONDS + " seconds",
+            List<String> crew = new ArrayList<>(List.of("§7In the ship room now (island and faction mates).", "§7When you set sail they get " + Expedition.MUSTER_SECONDS + " seconds",
                     "§7to pay for their own place - up to " + Expedition.CREW_MAX + " sail:"));
             for (ServerPlayer m : Expedition.crewOnDeck(is)) crew.add(" §f" + m.getName().getString());
             box.setItem(CREW, Stacks.named(new ItemStack(Items.PLAYER_HEAD), "§a§lCrew", crew.toArray(new String[0])));
@@ -234,8 +234,8 @@ public final class ExpeditionMenu {
                     "§7Time limit: §f" + (Expedition.TIME_LIMITS[diff] / 60) + " minutes §8(more with a crew)§7."));
             box.setItem(YES, Stacks.named(new ItemStack(Items.EMERALD_BLOCK), "§a§lI understand - set sail!",
                     Expedition.DIFF_COLORS[diff] + Expedition.DIFF_NAMES[diff] + " §7expedition",
-                    owe > 0 ? "§7You pay §6" + Economy.format(owe) + " §7when the airship leaves" : "§7Your place is already paid",
-                    "§7Anyone else on the deck gets " + Expedition.MUSTER_SECONDS + " seconds", "§7to pay " + Economy.format(Expedition.PRICES[diff]) + " for their own place."));
+                    owe > 0 ? "§7You pay §6" + Economy.format(owe) + " §7when you set sail" : "§7Your place is already paid",
+                    "§7Anyone else in the ship room gets " + Expedition.MUSTER_SECONDS + " seconds", "§7to pay " + Economy.format(Expedition.PRICES[diff]) + " for their own place."));
             box.setItem(NO, Stacks.named(new ItemStack(Items.REDSTONE_BLOCK), "§c§lNot yet", "§7Back to the helm."));
             frame(Stacks.named(new ItemStack(Items.STAINED_GLASS_PANE.pick(DyeColor.BLACK)), " "));
             broadcastChanges();

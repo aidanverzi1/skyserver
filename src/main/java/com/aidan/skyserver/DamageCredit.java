@@ -86,6 +86,8 @@ public final class DamageCredit {
         for (Map.Entry<UUID, Double> e : out.entrySet()) if (e.getValue() > best) { best = e.getValue(); top = e.getKey(); }
         final UUID killer = top;
         if (killer != null) Safe.run("kill effect", () -> com.aidan.skyserver.lobby.Cosmetics.kill(victim, killer));
+        // 5.19: kill streaks and bounties (Bedwars, Skywars, Gold Wars all come through here on a death).
+        com.aidan.skyserver.lobby.KillStreaks.died(victim, killer);
         return out;
     }
 

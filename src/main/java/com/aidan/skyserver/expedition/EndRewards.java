@@ -41,8 +41,8 @@ import java.util.function.Function;
  *  Wave guards  - Void Fragments (more per guard every 10 waves), chorus flowers, a rare mob head; Void Gusts
  *                 also drop wind charges and breeze rods.
  *  Mini bosses  - (waves 5, 15, 25...) Void Fragments, a shulker shell (50% at wave 5, 75% at 15, 100% from 25),
- *                 an echo shard (25%), a Swift Sneak III or Soul Speed III book (20%).
- *  Bosses       - (waves 10, 20, 30...) Void Fragments, an echo shard (50%). The FIRST Ender Dragon a player beats
+ *                 a bonus (25%: 3 more Void Fragments and a dragon's breath), a Swift Sneak III or Soul Speed III book (20%).
+ *  Bosses       - (waves 10, 20, 30...) Void Fragments, a bonus (50%: 5 more Void Fragments and 2 dragon's breath). The FIRST Ender Dragon a player beats
  *                 gives the Dragon Egg and Dragon Head (one per player, ever). Every other boss kill gives dragon's
  *                 breath, an Elytra chance (5% at wave 10, 10% at 20, 20% from 30) and a Wind Burst III book chance;
  *                 bosses from wave 20 on also give one random armour trim, guaranteed.
@@ -54,6 +54,8 @@ import java.util.function.Function;
  * 5.18b: guards drop fewer fragments each (more guards per wave, same total per wave); omens add +25% each.
  * The RECOVERY CHARM is made in the Void Shop from 5 echo shards: if you die on the End Expedition while carrying
  * one, it breaks and you go home with everything you had.
+ * 5.19: echo shards and the Silence and Ward trims moved to the Ancient City Expedition. The echo shard rolls became
+ * the bonus rolls above (more Void Fragments and dragon's breath).
  */
 public final class EndRewards {
     private EndRewards() {}
@@ -65,16 +67,19 @@ public final class EndRewards {
 
     /** Mini boss: shulker shell chance (%) by which mini boss of the trip it is (wave 5, 15, 25 and later). */
     static final int[] SHELL_CHANCE = {50, 75, 100};
-    static final int MINI_ECHO_CHANCE = 25, MINI_BOOK_CHANCE = 20;
-    static final int BOSS_ECHO_CHANCE = 50, BOSS_WIND_BURST_CHANCE = 15;
+    /** 5.19: the old echo shard chances, now a bonus: {chance %, extra Void Fragments, dragon's breath}. */
+    static final int MINI_BONUS_CHANCE = 25, MINI_BONUS_FRAGMENTS = 3, MINI_BONUS_BREATH = 1, MINI_BOOK_CHANCE = 20;
+    static final int BOSS_BONUS_CHANCE = 50, BOSS_BONUS_FRAGMENTS = 5, BOSS_BONUS_BREATH = 2, BOSS_WIND_BURST_CHANCE = 15;
     /** Boss: Elytra chance (%) at wave 10, 20, and 30 and later. */
     static final int[] ELYTRA_CHANCE = {5, 10, 20};
     /** Guards: chorus flower and mob head chances (%), Void Gust wind charge / breeze rod chances (%). */
     static final int CHORUS_CHANCE = 5, HEAD_CHANCE = 1, WIND_CHARGE_CHANCE = 30, BREEZE_ROD_CHANCE = 10;
 
+    /** 5.19: Silence and Ward are Ancient City trims now (AncientCity). */
+    /** 5.20: Tide moved to the Sunken Monument's vault (no longer from End bosses or the Void Shop). */
     static final String[] TRIMS = {"bolt", "coast", "dune", "eye", "flow", "host", "raiser", "rib", "sentry",
-            "shaper", "silence", "snout", "spire", "tide", "vex", "ward", "wayfinder", "wild"};
-    static final Set<String> RARE_TRIMS = Set.of("bolt", "eye", "flow", "silence", "spire", "tide", "vex", "ward");
+            "shaper", "snout", "spire", "vex", "wayfinder", "wild"};
+    static final Set<String> RARE_TRIMS = Set.of("bolt", "eye", "flow", "spire", "vex");
     static final int TRIM_PRICE = 100, RARE_TRIM_PRICE = 140;
     /** 5.18b Void Shop prices. */
     static final int PEARL_PRICE = 15, HEAD_PRICE = 75;
@@ -183,7 +188,10 @@ public final class EndRewards {
             give(p, fragments(scaled(3 + 2 * tier, bonus)));
             if (roll(SHELL_CHANCE[Math.min(which, SHELL_CHANCE.length - 1)])) give(p, new ItemStack(Items.SHULKER_SHELL));
             else Lobby.msg(p, "§7No shulker shell this time.");
-            if (roll(MINI_ECHO_CHANCE)) give(p, new ItemStack(Items.ECHO_SHARD));
+            if (roll(MINI_BONUS_CHANCE)) {
+                give(p, fragments(scaled(MINI_BONUS_FRAGMENTS, bonus)));
+                give(p, new ItemStack(Items.DRAGON_BREATH, MINI_BONUS_BREATH));
+            }
             if (roll(MINI_BOOK_CHANCE)) give(p, RNG.nextBoolean() ? book(server, Enchantments.SWIFT_SNEAK, 3) : book(server, Enchantments.SOUL_SPEED, 3));
         }
     }
@@ -192,7 +200,10 @@ public final class EndRewards {
     static void boss(MinecraftServer server, List<ServerPlayer> crew, int wave, int tier, boolean dragon, double bonus) {
         for (ServerPlayer p : crew) {
             give(p, fragments(scaled(5 + 3 * tier, bonus)));
-            if (roll(BOSS_ECHO_CHANCE)) give(p, new ItemStack(Items.ECHO_SHARD));
+            if (roll(BOSS_BONUS_CHANCE)) {
+                give(p, fragments(scaled(BOSS_BONUS_FRAGMENTS, bonus)));
+                give(p, new ItemStack(Items.DRAGON_BREATH, BOSS_BONUS_BREATH));
+            }
             if (dragon && !Progress.egg(p.getUUID())) {
                 Progress.setEgg(p.getUUID());
                 give(p, new ItemStack(item("dragon_egg")));
@@ -219,6 +230,7 @@ public final class EndRewards {
         for (ServerPlayer p : crew) {
             Economy.add(server, p.getUUID(), p.getName().getString(), EndExpedition.MONEY_PER_TEN);
             Lobby.msg(p, "§6+" + Economy.format(EndExpedition.MONEY_PER_TEN) + " §7for reaching wave " + wave + "! §8(already in your account)");
+            if (wave == 10 || wave == 20 || wave == 30) com.aidan.skyserver.lobby.Charts.stamp(p, "end_" + wave); // 5.19: Wren's Charts
             if (wave >= 30 && !Progress.pearl(p.getUUID())) {
                 Progress.setPearl(p.getUUID());
                 give(p, voidwalkerPearl());
@@ -520,7 +532,7 @@ public final class EndRewards {
                 MinecraftServer server = viewer.level().getServer();
                 if (o.echo() > 0) {
                     if (echoShards(viewer) < o.echo()) {
-                        Lobby.msg(viewer, "§cYou need " + o.echo() + " echo shards in your inventory (from End mini bosses and bosses).");
+                        Lobby.msg(viewer, "§cYou need " + o.echo() + " echo shards in your inventory (echo shards come from the Ancient City Expedition).");
                         return;
                     }
                     takeEchoShards(viewer, o.echo());

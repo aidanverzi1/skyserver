@@ -12,10 +12,10 @@ import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
-/** The /is menu: home, info, challenges, visitors, the upgrades, and (5.8) themes and Nether Expeditions. */
+/** The /is menu: home, info, challenges, visitors, the upgrades, themes, and (5.20) Captain Wren's ship room. */
 public final class IslandMenu extends LockedMenu {
     private static final int HOME = 10, INFO = 12, CHALLENGES = 14, VISITORS = 16;
-    private static final int THEME = 20, EXPEDITION = 22, VOUCHERS = 24, END = 26;
+    private static final int THEME = 20, EXPEDITION = 22, VOUCHERS = 24;
     private static final int SIZE = 28, GEN = 30, CROPS = 32, EXTRA = 34, HELP = 40, SPEED = 39;
     private static final int[] EGG_SLOTS = {37, 38, 42, 43};
     private static final net.minecraft.world.item.Item[] EGGS = {Items.SHEEP_SPAWN_EGG, Items.COW_SPAWN_EGG, Items.CHICKEN_SPAWN_EGG, Items.PIG_SPAWN_EGG};
@@ -55,8 +55,10 @@ public final class IslandMenu extends LockedMenu {
         box.setItem(THEME, Stacks.named(new ItemStack(Items.FLOWERING_AZALEA), "§a§lIsland Theme",
                 "§7Change your island's biome: grass,", "§7leaves, water and sky colours.", "§7Theme tokens: §f" + themes + " §8(from Epic chests)",
                 themes > 0 ? "§eClick to pick a theme" : "§8You need a theme token"));
-        box.setItem(EXPEDITION, com.aidan.skyserver.expedition.ExpeditionMenu.islandButton(viewer));
-        box.setItem(END, com.aidan.skyserver.expedition.EndExpedition.islandButton(viewer)); // 5.18
+        // 5.20: every expedition starts from Captain Wren in his ship room now.
+        box.setItem(EXPEDITION, Stacks.named(new ItemStack(Items.DARK_OAK_BOAT), "§6§lCaptain Wren's Ship Room",
+                "§7Talk to Wren there to start any", "§7expedition: §cNether§7, §5End§7, §3Ancient City§7,", "§bSunken Monument§7. Also his quests,",
+                "§7the Tribute Chests and the desk.", is.wrenRoom != null ? "§eClick to go there" : "§eNot placed yet: §f/is shiproom place"));
         box.setItem(VOUCHERS, Stacks.named(new ItemStack(Items.PAPER), "§d§lVouchers & Tickets",
                 "§7Upgrade vouchers (25% off): §f" + Tokens.count(viewer.getUUID(), Tokens.UPGRADE_VOUCHER),
                 "§8(used on your next upgrade below)",
@@ -110,8 +112,10 @@ public final class IslandMenu extends LockedMenu {
                 Islands.save();
             }
             case THEME -> Lobby.later(viewer, () -> IslandThemes.open(viewer));
-            case EXPEDITION -> Lobby.later(viewer, () -> com.aidan.skyserver.expedition.ExpeditionMenu.openSummon(viewer));
-            case END -> Lobby.later(viewer, () -> com.aidan.skyserver.expedition.EndExpedition.offer(viewer));
+            case EXPEDITION -> {
+                viewer.closeContainer();
+                Lobby.later(viewer, () -> WrenRoom.goTo(viewer));
+            }
             case SIZE -> result = Islands.buySize(viewer, is);
             case GEN -> result = Islands.buyGenerator(viewer, is);
             case CROPS -> result = Islands.buyCrops(viewer, is);

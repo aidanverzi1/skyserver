@@ -177,7 +177,7 @@ public final class BwStrategy {
             if (me.minute > 5 && me.fireballs < 2) wish.add("fireball");
             if (me.minute > 8 && !me.bow) wish.add("bow");
             if (me.minute > 10 && me.pick < 3) wish.add("pickaxe");
-            if (me.emeralds >= 1 && me.minute > 8) wish.add("rescue_cloud");
+            if (me.emeralds >= 2 && me.minute > 8) wish.add("rescue_cloud");
         }
         if (builder && me.minute > 3) wish.add("bed_bell");
         // People bridging at our base: a bow and arrows to shoot them off.
@@ -290,8 +290,14 @@ public final class BwStrategy {
     public static final int SOLO_AWAY_SECONDS = 45;
     /** How long one bot keeps the "work at home" job before it passes to another bot that's home. */
     public static final int HOME_JOB_SECONDS = 60;
+    /** 5.19: the minute bots start the end stone cover over their bed (and swap its wool for end stone). */
+    public static final double COVER_MINUTE = 5.0;
     /** Enemies bridging closer than this to our base get intercepted. */
     public static final double INTERCEPT_RANGE = 15;
+    /** 5.19: bridgers this close to our base are watched; a bot with a bow shoots them from this far (and in sight). */
+    public static final double BRIDGER_WATCH_RANGE = 45, BRIDGER_SHOOT_RANGE = 32;
+    /** 5.19: extra arrow spread per block of distance past 12 blocks. */
+    public static final double BRIDGER_SPREAD_PER_BLOCK = 0.06;
     /** An enemy this close to our bed sets off the alarm (everyone comes back). */
     public static final double BED_ALARM_RANGE = 10;
 

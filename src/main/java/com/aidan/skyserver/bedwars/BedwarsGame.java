@@ -425,8 +425,8 @@ public final class BedwarsGame {
         LiteralArgumentBuilder<CommandSourceStack> bw = Commands.literal("bw").executes(c -> {
             ServerPlayer p = c.getSource().getPlayerOrException();
             msg(p, "§c§lBEDWARS §7- " + lobbyStatus());
-            msg(p, "§e/bw join [trios|duos] §7- join the next match   §e/bw leave §7- leave");
-            msg(p, "§e/bw stats §7- your Bedwars stats   §e/bw vote <map> §7- vote for a map");
+            msg(p, "§e/bw §7or §e/bw join [trios|duos] §7- join the next match   §e/leave §7- leave");
+            msg(p, "§e/stats §7- your Bedwars stats   §e/bw vote <map> §7- vote for a map");
             return 1;
         });
         bw.then(Commands.literal("join").executes(c -> {
@@ -645,7 +645,7 @@ public final class BedwarsGame {
             return;
         }
         if (players.containsKey(id)) {
-            msg(p, "§eYou're already in Bedwars. §7/bw leave to quit.");
+            msg(p, "§eYou're already in Bedwars. §7/leave to quit.");
             return;
         }
         if (com.aidan.skyserver.goldwars.GoldWarsGame.isInGame(id) || com.aidan.skyserver.skywars.SkywarsGame.isInGame(id)) {
@@ -785,7 +785,7 @@ public final class BedwarsGame {
             if (bp.eliminated || teams.get(bp.team).out) {
                 bp.eliminated = true;
                 spectate(p, bp);
-                msg(p, "§7Your team's bed is gone, so you're watching. §e/bw leave §7to go back.");
+                msg(p, "§7Your team's bed is gone, so you're watching. §e/leave §7to go back.");
             } else {
                 bp.respawnAt = ticks + BwRules.RESPAWN_SECONDS * 20L;
                 spectate(p, bp);
@@ -1443,6 +1443,8 @@ public final class BedwarsGame {
         }
         if (p instanceof BotPlayer b && b.brain() instanceof BedwarsBrain brain) brain.onDeath(killer);
         // Tools drop a level (never below the first), the sword goes back to wood.
+        // 5.19: armor drops one tier too (diamond -> iron -> chain), never below chain. Bots the same.
+        if (bp.armor > BwRules.ARMOR_FLOOR) bp.armor--;
         if (bp.pick > 1) bp.pick--;
         if (bp.axe > 1) bp.axe--;
         bp.sword = 0;
@@ -1454,7 +1456,7 @@ public final class BedwarsGame {
             bp.eliminated = true;
             bp.respawnAt = -1;
             spectate(p, bp);
-            Announce.title(p, "§c§lELIMINATED", "§7Your bed was gone. §e/bw leave §7to go back", 5, 60, 10);
+            Announce.title(p, "§c§lELIMINATED", "§7Your bed was gone. §e/leave §7to go back", 5, 60, 10);
             checkTeams();
         } else {
             bp.respawnAt = ticks + BwRules.RESPAWN_SECONDS * 20L;
@@ -1876,7 +1878,7 @@ public final class BedwarsGame {
             l.add("§fMode: §a" + BwRules.mode.text);
         }
         l.add("   ");
-        l.add("§7/bw leave");
+        l.add("§7/leave");
         return l;
     }
 
@@ -1890,7 +1892,7 @@ public final class BedwarsGame {
                     ? "  §7Bots in " + clock((int) Math.max(0, BotManager.FILL_AFTER_SECONDS * 20L - (ticks - waitStart))) : "");
             else if (state == State.COUNTDOWN) text = "§eStarting in " + (timer / 20);
             else if (state == State.ENDING) text = "§6Game over";
-            else if (bp.eliminated) text = "§7Spectating §8- §e/bw leave §7to go back";
+            else if (bp.eliminated) text = "§7Spectating §8- §e/leave §7to go back";
             else if (bp.respawnAt >= 0) text = "§cRespawning in " + Math.max(1, (bp.respawnAt - ticks + 19) / 20);
             else {
                 int[] res = BwShop.resources(p);

@@ -459,15 +459,31 @@ public final class ChestPages {
             }
             confirmUntil = 0;
             long price = PRICES[owned];
+            // 5.19: check the chest can take pages BEFORE taking the money (before 5.18b the chest mixin wasn't
+            // loaded, so the money went and nothing changed), and give the money back if the pages didn't stick.
+            List<BlockEntity> parts = halves(level, pos);
+            boolean canGrow = !parts.isEmpty();
+            for (BlockEntity be : parts) if (!(be instanceof ChestPagesAccess)) canGrow = false;
+            if (!canGrow) {
+                Lobby.msg(sp, "§cThis chest can't take extra pages right now - nothing was charged. Tell an admin.");
+                com.aidan.skyserver.Skyserver.LOGGER.warn("[ChestPages] chest at {} isn't a ChestPagesAccess - is ChestPagesMixin in skyserver.mixins.json?", pos);
+                return;
+            }
             if (!Economy.take(level.getServer(), sp.getUUID(), price)) {
                 Lobby.msg(sp, "§cYou need " + Economy.format(price) + " for another page.");
                 return;
             }
-            for (BlockEntity be : halves(level, pos)) {
-                if (be instanceof ChestPagesAccess a) {
-                    a.skyserver$setPages(owned + 1);
-                    be.setChanged();
-                }
+            int before = real.getContainerSize();
+            for (BlockEntity be : parts) {
+                ChestPagesAccess a = (ChestPagesAccess) be;
+                a.skyserver$setPages(owned + 1);
+                be.setChanged();
+            }
+            if (pagesOf(level, pos) <= owned || real.getContainerSize() <= before) {
+                Economy.add(level.getServer(), sp.getUUID(), sp.getName().getString(), price);
+                Lobby.msg(sp, "§cThe page didn't stick, so your " + Economy.format(price) + " was given back. Tell an admin.");
+                com.aidan.skyserver.Skyserver.LOGGER.warn("[ChestPages] page purchase at {} didn't grow the chest ({} -> {} slots) - refunded", pos, before, real.getContainerSize());
+                return;
             }
             Lobby.msg(sp, "§a+ Page bought for " + Economy.format(price) + "! §7This chest now has " + real.getContainerSize() + " slots.");
             sp.level().playSound(null, pos, SoundEvents.PLAYER_LEVELUP, SoundSource.BLOCKS, 0.6f, 1.6f);

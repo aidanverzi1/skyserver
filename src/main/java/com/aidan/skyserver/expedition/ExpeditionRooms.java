@@ -135,6 +135,22 @@ final class ExpeditionRooms {
         }
     }
 
+    /** 5.19: one of the 5 gold blocks set into a bridge floor, and what breaking it does. */
+    static final class GoldTrap {
+        static final int JACKPOT = 0, LAVA = 1, AMBUSH = 2, TNT = 3;
+        final BlockPos pos;
+        final int kind;
+        /** A spot on the bridge a few blocks away, where the ambushing brute steps out. */
+        final BlockPos ambushFrom;
+        boolean sprung = false;
+
+        GoldTrap(BlockPos pos, int kind, BlockPos ambushFrom) {
+            this.pos = pos;
+            this.kind = kind;
+            this.ambushFrom = ambushFrom;
+        }
+    }
+
     /** Everything planned for one trip. */
     static final class Layout {
         Room spawn, arena;
@@ -146,6 +162,8 @@ final class ExpeditionRooms {
         /** Floor spots for the Gilded Tyrant's three gold pillars. */
         final List<BlockPos> pillarSpots = new ArrayList<>();
         final List<Secret> secrets = new ArrayList<>();
+        /** 5.19: the 5 trapped gold blocks on the bridges (ExpeditionGold). */
+        final List<GoldTrap> goldTraps = new ArrayList<>();
         BlockPos center, landing;
         double[] wren;
         Builder builder;
@@ -188,7 +206,7 @@ final class ExpeditionRooms {
                 rail = Blocks.POLISHED_BLACKSTONE_BRICK_WALL.defaultBlockState();
                 cover = Blocks.POLISHED_BLACKSTONE_WALL.defaultBlockState();
                 pillar = Blocks.POLISHED_BASALT.defaultBlockState();
-                accent = Blocks.GOLD_BLOCK.defaultBlockState();
+                accent = Blocks.GILDED_BLACKSTONE.defaultBlockState(); // 5.19: was gold blocks (50+ per map)
                 stairs = Blocks.POLISHED_BLACKSTONE_BRICK_STAIRS.defaultBlockState();
                 slab = Blocks.POLISHED_BLACKSTONE_BRICK_SLAB.defaultBlockState();
                 roof = Blocks.BLACKSTONE.defaultBlockState();
@@ -360,11 +378,12 @@ final class ExpeditionRooms {
             }
 
         // ---- Bridges: hub spokes, and the outer ring ----
-        for (int s = 0; s < 4; s++) bridge(c, t, cx, cz, HUB_HALF, cx + SIDES[s][0] * PITCH, cz + SIDES[s][1] * PITCH, ROOM_HALF, rng);
+        List<int[]> bridges = new ArrayList<>();
+        for (int s = 0; s < 4; s++) bridges.add(bridge(c, t, cx, cz, HUB_HALF, cx + SIDES[s][0] * PITCH, cz + SIDES[s][1] * PITCH, ROOM_HALF, rng));
         int[][] ring = {{-1, -1}, {0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}};
         for (int k = 0; k < ring.length; k++) {
             int[] a = ring[k], b = ring[(k + 1) % ring.length];
-            bridge(c, t, cx + a[0] * PITCH, cz + a[1] * PITCH, ROOM_HALF, cx + b[0] * PITCH, cz + b[1] * PITCH, ROOM_HALF, rng);
+            bridges.add(bridge(c, t, cx + a[0] * PITCH, cz + a[1] * PITCH, ROOM_HALF, cx + b[0] * PITCH, cz + b[1] * PITCH, ROOM_HALF, rng));
         }
 
         // ---- The Boss Arena, behind its gate ----
@@ -372,6 +391,9 @@ final class ExpeditionRooms {
         int bx = cx + SIDES[bossSide][0] * BOSS_DIST, bz = cz + SIDES[bossSide][1] * BOSS_DIST;
         lay.arena = bossArena(c, t, bx, bz, (bossSide + 2) % 4, lay, rng);
         bridge(c, t, ex, ez, ROOM_HALF, bx, bz, BOSS_HALF, rng);
+
+        // ---- 5.19: five trapped gold blocks, each on a different bridge (outside the arenas) ----
+        goldTraps(c, t, lay, bridges, rng);
 
         // ---- 1-2 secret alcoves on the outer walls of chest arenas ----
         List<Room> shuffled = new ArrayList<>(lay.rooms);
@@ -824,14 +846,14 @@ final class ExpeditionRooms {
             for (int x = 17 - r; x <= 17 + r; x++)
                 for (int z = 17 - r; z <= 17 + r; z++) {
                     boolean corner = Math.abs(x - 17) == r && Math.abs(z - 17) == r;
-                    d.set(x, tier, z, corner ? Blocks.GOLD_BLOCK.defaultBlockState() : tier == 2 ? t.trim : t.floorB);
+                    d.set(x, tier, z, corner ? Blocks.GILDED_BLACKSTONE.defaultBlockState() : tier == 2 ? t.trim : t.floorB);
                 }
         }
         for (int[] p : new int[][]{{6, 6}, {27, 6}, {6, 27}, {27, 27}}) {
             for (int x = p[0]; x < p[0] + 2; x++)
                 for (int z = p[1]; z < p[1] + 2; z++) {
                     for (int y = 0; y < H - 2; y++) d.set(x, y, z, Blocks.POLISHED_BASALT.defaultBlockState());
-                    d.set(x, H - 2, z, Blocks.GOLD_BLOCK.defaultBlockState());
+                    d.set(x, H - 2, z, Blocks.GILDED_BLACKSTONE.defaultBlockState());
                 }
             d.set(p[0] - 1, 5, p[1], t.lantern);
             d.set(p[0] - 1, 4, p[1], t.cover);
@@ -873,7 +895,7 @@ final class ExpeditionRooms {
         Cell r = new Cell(c, cx, cz, ROOM, rng.nextInt(4), t, rng);
         dais(r, 17, 17, 3);
         for (int y = 1; y <= 6; y++) r.set(17, y, 17, y == 6 ? t.glow : t.fortress ? t.trim : Blocks.POLISHED_BASALT.defaultBlockState());
-        if (!t.fortress) r.set(17, 7, 17, Blocks.GOLD_BLOCK.defaultBlockState());
+        if (!t.fortress) r.set(17, 7, 17, Blocks.GILDED_BLACKSTONE.defaultBlockState());
         // A broken arch.
         for (int y = 0; y < 7; y++) {
             r.set(8, y, 6, t.pillar);
@@ -889,7 +911,7 @@ final class ExpeditionRooms {
     }
 
     /** A railed bridge between two platforms on the same row or column (half = each platform's half size). */
-    private static void bridge(Canvas c, Theme t, int ax, int az, int ha, int bx, int bz, int hb, Random rng) {
+    private static int[] bridge(Canvas c, Theme t, int ax, int az, int ha, int bx, int bz, int hb, Random rng) {
         boolean alongX = az == bz;
         int a = alongX ? ax : az, b = alongX ? bx : bz;
         int sign = Integer.signum(b - a);
@@ -920,6 +942,63 @@ final class ExpeditionRooms {
         for (int y = SEA_Y - 3; y <= FLOOR_Y - 3; y++)
             for (int u = -1; u <= 1; u++)
                 for (int w = -2; w <= 2; w++) c.set(alongX ? px + u : px + w, y, alongX ? pz + w : pz + u, y % 5 == 0 ? t.band : t.wall);
+        return new int[]{alongX ? 1 : 0, fixed, lo, hi, mid};
+    }
+
+    /** 5.19: how many trapped gold blocks a map gets, and the jackpot's chance (%). */
+    static final int GOLD_TRAPS = 5, JACKPOT_CHANCE = 5;
+
+    /**
+     * 5.19: puts GOLD_TRAPS gold blocks into bridge floors, one per bridge, never near the pier in the middle.
+     * Each one is rolled now so its "tell" can be built next to it:
+     *  - Jackpot (5%): no tell. Safe, and drops extra gold and a diamond.
+     *  - Lava drop: a magma block on each side of it, and nothing underneath - break it while standing
+     *    on it and you fall to the lava sea.
+     *  - Ambush: the railing beside it is a cracked brick. One piglin brute steps out when it breaks.
+     *  - TNT: a pressure plate on the floor next to it. Hidden TNT underneath goes off 1.5 s later.
+     */
+    private static void goldTraps(Canvas c, Theme t, Layout lay, List<int[]> bridges, Random rng) {
+        List<int[]> pool = new ArrayList<>(bridges);
+        Collections.shuffle(pool, rng);
+        BlockState gold = Blocks.GOLD_BLOCK.defaultBlockState();
+        for (int[] b : pool) {
+            if (lay.goldTraps.size() >= GOLD_TRAPS) break;
+            boolean alongX = b[0] == 1;
+            int fixed = b[1], lo = b[2], hi = b[3], mid = b[4];
+            List<Integer> ks = new ArrayList<>();
+            for (int k = lo + 2; k <= hi - 2; k++) if (Math.abs(k - mid) >= 3) ks.add(k);
+            if (ks.isEmpty()) continue;
+            int k = ks.get(rng.nextInt(ks.size()));
+            int w = rng.nextInt(3) - 1; // -1, 0 or 1: away from the edges
+            int x = alongX ? k : fixed + w, z = alongX ? fixed + w : k;
+            int kind = rng.nextInt(100) < JACKPOT_CHANCE ? GoldTrap.JACKPOT : 1 + rng.nextInt(3);
+            c.set(x, FLOOR_Y - 1, z, gold);
+            // Toward the nearer end of the bridge, 4 blocks away: where an ambusher appears.
+            int away = (k - lo < hi - k) ? 4 : -4;
+            int ak = Math.max(lo, Math.min(hi, k + away));
+            BlockPos from = new BlockPos(alongX ? ak : fixed, FLOOR_Y, alongX ? fixed : ak);
+            switch (kind) {
+                case GoldTrap.LAVA -> {
+                    c.set(x, FLOOR_Y - 2, z, AIR);
+                    for (int s = -1; s <= 1; s += 2) {
+                        int ww = w + s;
+                        if (Math.abs(ww) > 2) continue;
+                        c.set(alongX ? k : fixed + ww, FLOOR_Y - 1, alongX ? fixed + ww : k, Blocks.MAGMA_BLOCK.defaultBlockState());
+                    }
+                }
+                case GoldTrap.AMBUSH -> {
+                    int edge = w >= 0 ? 3 : -3;
+                    c.set(alongX ? k : fixed + edge, FLOOR_Y, alongX ? fixed + edge : k, t.cracked);
+                }
+                case GoldTrap.TNT -> {
+                    c.set(x, FLOOR_Y - 2, z, Blocks.TNT.defaultBlockState());
+                    int pk = k + (rng.nextBoolean() ? 1 : -1);
+                    c.set(alongX ? pk : fixed + w, FLOOR_Y, alongX ? fixed + w : pk, Blocks.STONE_PRESSURE_PLATE.defaultBlockState());
+                }
+                default -> { }
+            }
+            lay.goldTraps.add(new GoldTrap(new BlockPos(x, FLOOR_Y - 1, z), kind, from));
+        }
     }
 
     /**

@@ -121,7 +121,9 @@ public final class Lobby {
      */
     public static boolean isIsland(Level l) {
         return com.aidan.skyserver.island.Islands.isIsland(l) || com.aidan.skyserver.expedition.Expedition.isExpedition(l)
-                || com.aidan.skyserver.expedition.EndExpedition.isEnd(l); // 5.18
+                || com.aidan.skyserver.expedition.EndExpedition.isEnd(l) // 5.18
+                || com.aidan.skyserver.expedition.AncientCity.isCity(l) // 5.19
+                || com.aidan.skyserver.expedition.SunkenMonument.isSunken(l); // 5.20
     }
 
     /** Survival is on hold for now (Sky Island is the main mode). Set to true to open it again. */
@@ -432,6 +434,7 @@ public final class Lobby {
         Activities.setup(server);
         Town.setup();
         levelBoard = Holograms.add(LobbyDesign.SPAWN[0] + 9, LobbyDesign.G + 4.5, LobbyDesign.SPAWN[2] - 4, List.of("§6§lTOP LEVELS", "§7nobody yet"));
+        Boosters.setupBoard(LobbyDesign.SPAWN[0] - 9, LobbyDesign.G + 4.5, LobbyDesign.SPAWN[2] - 4); // 5.19: Most Generous (tips)
     }
 
     // =====================================================================

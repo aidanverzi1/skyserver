@@ -65,6 +65,9 @@ public abstract class BotBrain {
     private int strafeDir = 1;
     private long nextStrafeFlip = 0;
     private int drawTicks = 0;
+    /** 5.19: extra spread (blocks) for the next shot - long shots miss more. Set by a brain before shoot(), 0 = none. */
+    protected double shotSpread = 0;
+    private Vec3 shotOffset = Vec3.ZERO;
     private boolean resprint = false;
 
     protected BotBrain(BotPlayer bot) {
@@ -973,10 +976,12 @@ public abstract class BotBrain {
             select(slot);
             bot.gameMode.useItem(bot, level(), bot.getMainHandItem(), InteractionHand.MAIN_HAND);
             drawTicks = 0;
+            shotOffset = shotSpread <= 0 ? Vec3.ZERO
+                    : new Vec3((rng.nextDouble() - 0.5) * shotSpread, (rng.nextDouble() - 0.5) * shotSpread * 0.5, (rng.nextDouble() - 0.5) * shotSpread);
         }
         drawTicks++;
 
-        Vec3 aim = beam ? t.position().add(0, t.getBbHeight() * 0.55, 0) : arrowAim(t);
+        Vec3 aim = (beam ? t.position().add(0, t.getBbHeight() * 0.55, 0) : arrowAim(t)).add(shotOffset);
         if (reacted()) lookAt(aim, d().bowError / Math.max(0.5, d().aimError));
         // Count the draw by how long the bow has really been pulled (what the server judges the shot by).
         int drawn = Math.min(drawTicks, bot.getTicksUsingItem());

@@ -77,9 +77,10 @@ public final class Ranks {
         String title = prof == null ? null : prof.title;
         int pr = Levels.prestige(p.getUUID());
         boolean mod = Mods.isMod(p.getUUID());
+        boolean patron = Boosters.isPatron(p.getUUID()); // 5.19: [Patron] while their booster runs
         String color = CosmeticsPlus.color(p.getUUID());
         boolean rainbow = "color_rainbow".equals(color);
-        String key = (mod ? "ssM" : "ss") + (pr > 0 ? "P" + Progression.labelIndex(pr) : "L" + Levels.level(p.getUUID()))
+        String key = (mod ? "ssM" : "ss") + (patron ? "B" : "") + (pr > 0 ? "P" + Progression.labelIndex(pr) : "L" + Levels.level(p.getUUID()))
                 + (title == null ? "" : "_" + Math.abs(title.hashCode() % 100000))
                 + (color == null ? "" : rainbow ? "_r" + Math.abs(p.getUUID().hashCode() % 1000000) : "_" + color.substring(6));
         if (current != null && current.getName().equals(key)) {
@@ -89,7 +90,7 @@ public final class Ranks {
         PlayerTeam team = sb.getPlayerTeam(key);
         if (team == null) {
             team = sb.addPlayerTeam(key);
-            team.setPlayerPrefix(Component.literal((mod ? MOD_TAG : "") + Levels.chatTag(p.getUUID())));
+            team.setPlayerPrefix(Component.literal((mod ? MOD_TAG : "") + (patron ? Boosters.PATRON_TAG : "") + Levels.chatTag(p.getUUID())));
             if (title != null) team.setPlayerSuffix(Component.literal(" " + Progression.cosmeticName(title)));
             TeamColor c = rainbow ? RAINBOW[0] : teamColor(color);
             if (c != null) team.setColor(Optional.of(c));

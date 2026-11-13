@@ -1,5 +1,6 @@
 package com.aidan.skyserver.island;
 
+import com.aidan.skyserver.Safe;
 import com.aidan.skyserver.Skyserver;
 import com.aidan.skyserver.bots.BotPlayer;
 import com.aidan.skyserver.goldwars.GoldWarsMap;
@@ -173,6 +174,8 @@ public final class Islands {
         public final Map<UUID, String> trustedNames = new HashMap<>();
         /** Where Captain Wren stands {x, y, z, yaw}, or null for his default spot by the path. */
         public double[] wren = null;
+        /** 5.20: Captain Wren's ship room {x, y, z, rotation} (WrenRoom), or null if it isn't placed yet. */
+        public int[] wrenRoom = null;
         /** This island's own time of day: ticks added to the shared clock (0..23999). */
         public long timeOffset = 0;
 
@@ -385,6 +388,10 @@ public final class Islands {
                 is.wren = new double[]{a.get(0).getAsDouble(), a.get(1).getAsDouble(), a.get(2).getAsDouble(), a.get(3).getAsDouble()};
             }
             if (o.has("timeOffset")) is.timeOffset = o.get("timeOffset").getAsLong();
+            if (o.has("wrenRoom")) {
+                JsonArray a = o.getAsJsonArray("wrenRoom");
+                is.wrenRoom = new int[]{a.get(0).getAsInt(), a.get(1).getAsInt(), a.get(2).getAsInt(), a.get(3).getAsInt()};
+            }
             // Islands from before join dates were saved: count from now.
             long nowMs = System.currentTimeMillis();
             is.memberSince.putIfAbsent(is.owner, nowMs);
@@ -468,6 +475,11 @@ public final class Islands {
                 o.add("wren", a);
             }
             o.addProperty("timeOffset", is.timeOffset);
+            if (is.wrenRoom != null) {
+                JsonArray a = new JsonArray();
+                for (int x : is.wrenRoom) a.add(x);
+                o.add("wrenRoom", a);
+            }
             list.add(o);
         }
         root.add("islands", list);
@@ -505,6 +517,7 @@ public final class Islands {
         ISLANDS_BY_ID.put(is.id, is);
         ISLAND_OF.put(p.getUUID(), is.id);
         OWNS.put(p.getUUID(), is.id);
+        Safe.run("ship room", () -> WrenRoom.buildDefault(level, is)); // 5.20: Captain Wren's ship room
         save();
         Skyserver.LOGGER.info("Built Sky Island #{} for {} at {}, {}", is.id, is.ownerName, cx, cz);
         return is;
@@ -656,6 +669,8 @@ public final class Islands {
         } else {
             WREN_CHECKS.put(is.id, ticks + 40);
         }
+        if (is.wrenRoom == null && is.owner.equals(p.getUUID())) // 5.20
+            Lobby.msg(p, "§6New: §fCaptain Wren wants a ship room! §7Expeditions now start there. Stand where the door should go, face where the ship should be, and type §e/is shiproom place§7.");
         if (fromLobby) {
             int n = Mailbox.deliver(p);
             if (n > 0) Lobby.msg(p, "§aDelivered " + n + " prize" + (n == 1 ? "" : "s") + " to your inventory.");
@@ -766,7 +781,7 @@ public final class Islands {
         Lobby.runLater(() -> arrive(v, is, false));
     }
 
-    private static Island findByName(String name) {
+    static Island findByName(String name) {
         ServerPlayer online = server.getPlayerList().getPlayerByName(name);
         if (online != null) return islandOf(online.getUUID());
         for (Island is : all()) {
@@ -1780,6 +1795,14 @@ public final class Islands {
                     .executes(c -> { untrust(c.getSource().getPlayerOrException(), StringArgumentType.getString(c, "player")); return 1; })));
             is.then(Commands.literal("trusted").executes(c -> { listTrusted(c.getSource().getPlayerOrException()); return 1; }));
             is.then(Commands.literal("movewren").executes(c -> { IslandQuests.moveWren(c.getSource().getPlayerOrException()); return 1; }));
+            // 5.20: Captain Wren's ship room.
+            is.then(Commands.literal("shiproom")
+                    .executes(c -> { WrenRoom.goTo(c.getSource().getPlayerOrException()); return 1; })
+                    .then(Commands.literal("place").executes(c -> { WrenRoom.place(c.getSource().getPlayerOrException()); return 1; }))
+                    .then(Commands.literal("confirm").executes(c -> { WrenRoom.confirm(c.getSource().getPlayerOrException()); return 1; }))
+                    .then(Commands.literal("cancel").executes(c -> { WrenRoom.cancel(c.getSource().getPlayerOrException()); return 1; }))
+                    .then(Commands.literal("visit").then(Commands.argument("player", StringArgumentType.word())
+                            .executes(c -> { WrenRoom.visit(c.getSource().getPlayerOrException(), StringArgumentType.getString(c, "player")); return 1; }))));
             is.then(Commands.literal("members").executes(c -> {
                 ServerPlayer p = c.getSource().getPlayerOrException();
                 Island i = islandOf(p.getUUID());
@@ -1848,11 +1871,13 @@ public final class Islands {
                 "§e/is leave §7- leave a co-op island",
                 "§e/is trust <player> [minutes] §7- let someone build for a while (60 min default; no chests)",
                 "§e/is untrust <player> §7| §e/is trusted §7- take it back / see who has it",
-                "§e/is movewren §7- move Captain Wren to where you're standing",
+                "§e/is shiproom §7- go to Captain Wren's ship room (quests, expeditions, Tribute Chests)",
+                "§e/is shiproom place §7- place (or move) the ship room: stand at the door, face the ship (owner)",
+                "§e/is shiproom visit <player> §7- an island or faction mate's ship room",
                 "§e/is members §7| §e/is level §7| §e/is top §7| §e/is challenges",
-                "§e/is quest §7- Captain Wren's current quest (talk to him by the path)",
+                "§e/is quest §7- Captain Wren's current quest (talk to him in his ship room)",
                 "§e/is theme §7- change your island's look (needs a theme token)",
-                "§e/is expedition §7- call Captain Wren's airship for a Nether Expedition",
+                "§e/is expedition §7- start a Nether Expedition (or talk to Wren for every expedition)",
                 "§e/claim §7- collect mystery chest prizes on your island",
                 "§e/lobby §7- back to the lobby (stand still 5 seconds)"};
         for (String l : lines) Lobby.msg(p, l);

@@ -154,10 +154,10 @@ public final class BwRules {
             new Offer("iron_sword", "Iron Sword", Category.MELEE, 1, GOLD, 7),
             new Offer("diamond_sword", "Diamond Sword", Category.MELEE, 1, EMERALD, 4),
             new Offer("kb_stick", "Knockback Stick", Category.MELEE, 1, GOLD, 5, "Knockback I. Send them flying."),
-            // Armor (kept for the whole match)
+            // Armor (5.19: drops one tier when you die, never below chainmail)
             new Offer("chain_armor", "Chainmail Armor", Category.ARMOR, 1, IRON, 24, "Leggings and boots.", "§aKept when you die."),
-            new Offer("iron_armor", "Iron Armor", Category.ARMOR, 1, GOLD, 12, "Leggings and boots.", "§aKept when you die."),
-            new Offer("diamond_armor", "Diamond Armor", Category.ARMOR, 1, EMERALD, 6, "Leggings and boots.", "§aKept when you die."),
+            new Offer("iron_armor", "Iron Armor", Category.ARMOR, 1, GOLD, 12, "Leggings and boots.", "§eDrops to chainmail when you die."),
+            new Offer("diamond_armor", "Diamond Armor", Category.ARMOR, 1, EMERALD, 6, "Leggings and boots.", "§eDrops to iron when you die."),
             // Tools (go down one level when you die)
             new Offer("pickaxe", "Pickaxe", Category.TOOLS, 1, IRON, 10, "Upgrades one level per buy.", "§eDrops one level when you die."),
             new Offer("axe", "Axe", Category.TOOLS, 1, IRON, 10, "Upgrades one level per buy.", "§eDrops one level when you die."),
@@ -185,7 +185,7 @@ public final class BwRules {
             new Offer("grapple", "Wren's Grapple", Category.SPECIAL, 1, GOLD, 6, "Cast at a block, reel in", "to be pulled to it. 5 uses.", "§7Captain Wren's own design."),
             new Offer("decoy_bed", "Decoy Bed", Category.SPECIAL, 1, GOLD, 6, "Looks just like your bed.", "Enemies who break it get", "blasted and lit up for all to see."),
             new Offer("blanket", "Bed Blanket", Category.SPECIAL, 1, EMERALD, 3, "Right-click: your bed can't be", "broken for 20 seconds.", "§eOnce per team per match."),
-            new Offer("rescue_cloud", "Rescue Cloud", Category.SPECIAL, 1, EMERALD, 1, "Keep it on you: if you fall", "into the void, a cloud catches you.", "§eUsed up when it saves you."),
+            new Offer("rescue_cloud", "Rescue Cloud", Category.SPECIAL, 1, EMERALD, 2, "Keep it on you: if you fall", "into the void, a cloud catches you.", "§eUsed up when it saves you."),
             new Offer("spring_pad", "Spring Pad", Category.SPECIAL, 1, GOLD, 4, "Place it, step on it, fly.", "Great for crossing gaps."),
             new Offer("airship_plank", "Airship Plank", Category.SPECIAL, 1, GOLD, 2, "Place it: an 8-block plank walk", "shoots out ahead of you.", "§eIt crumbles after 10 seconds."),
             new Offer("bed_bell", "Bed Bell", Category.SPECIAL, 1, GOLD, 4, "Rings for your whole team when an", "enemy breaks blocks near your bed.", "§eOnce per team, lasts all match.")
@@ -218,6 +218,9 @@ public final class BwRules {
     public static final int[][] PICKAXE_COST = {{IRON, 10}, {IRON, 10}, {GOLD, 3}, {GOLD, 6}};
     /** Axe levels 1..4 (wood Eff I, stone Eff I, iron Eff II, diamond Eff III). */
     public static final int[][] AXE_COST = {{IRON, 10}, {IRON, 10}, {GOLD, 3}, {GOLD, 6}};
+
+    /** 5.19: armor drops one tier per death, but never below this (1 = chainmail). Leather stays leather. */
+    public static final int ARMOR_FLOOR = 1;
 
     /** Armor tier: 0 leather, 1 chain, 2 iron, 3 diamond. */
     public static int armorTier(String offerId) {

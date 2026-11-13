@@ -32,7 +32,8 @@ import java.util.*;
  *  - Emeralds: first trip right after the team's first Forge, then about every 3 minutes (learned).
  *  - Bed attacked (enemy within 10 blocks of the bed, the bell / a trap / the alarm) -> everyone comes
  *    back (ender pearl if far). A bot already breaking an enemy bed finishes the job first.
- *  - End stone cover over the defence once Forge II and the Healing Spring are bought (~minute 8-10).
+ *  - End stone cover over the defence from about minute 5 (5.19), and reachable wool in it is swapped for end stone.
+ *  - 5.19: a bot with a bow shoots bridgers heading our way as soon as they're within 32 blocks and in sight.
  *  - Bridgers are only intercepted when they're within 15 blocks of the base; no waiting at the edge.
  *  - Buys by situation: fireballs/TNT and tools that match the enemy bed's defence, a bow when people
  *    bridge at us, golden apples before fights, a Rescue Cloud after being knocked into the void.
@@ -648,6 +649,14 @@ public final class BedwarsBrain extends BotBrain {
             buildDefence(missing);
             return;
         }
+        // 5.19: the defence is whole: swap any reachable wool in it for end stone (only with end stone in hand).
+        if (missing.isEmpty() && !soloLoop && endstoneCount() > 0) {
+            BlockPos wool = woolToReplace();
+            if (wool != null) {
+                replaceWool(wool);
+                return;
+            }
+        }
         // A lone bot: short loops (home -> diamonds -> home), never away long.
         if (teamBots() == 1 && !humanOnTeam()) {
             if (!soloLoop && age - lastLoopEnd > 30 * 20 && countBlocks() >= 16 && minute() > 1.5) {
@@ -752,11 +761,15 @@ public final class BedwarsBrain extends BotBrain {
             if (et == null || et == team || ignore.containsKey(e.getUUID())) continue;
             if (e.hasEffect(net.minecraft.world.effect.MobEffects.INVISIBILITY)) continue;
             double toBase = e.position().distanceTo(base);
-            if (toBase > 32 || !onBridge(e)) continue;
+            if (toBase > BwStrategy.BRIDGER_WATCH_RANGE || !onBridge(e)) continue;
             // Heading our way: closer to our base than to their own.
             if (toBase > e.position().distanceTo(Vec3.atCenterOf(BedwarsBots.base(et)))) continue;
-            ts().lastBridger = BedwarsBots.matchTicks();
-            if (toBase > BwStrategy.INTERCEPT_RANGE) continue;
+            if (toBase <= 32) ts().lastBridger = BedwarsBots.matchTicks();
+            // 5.19: a bot with a bow shoots at a bridger as soon as they're in bow range and in sight,
+            // not only once they're close to our island.
+            boolean canShoot = findArrowCount() > 0 && findSlot(st -> st.is(Items.BOW)) >= 0
+                    && distanceTo(e) <= BwStrategy.BRIDGER_SHOOT_RANGE && bot.hasLineOfSight(e);
+            if (toBase > BwStrategy.INTERCEPT_RANGE && !canShoot) continue;
             if (groundTo(e.position()) && distanceTo(e) < 6) continue; // they've landed: normal fighting
             if (!mayTarget(e)) continue;                               // 5.13: a teammate bot already has him
             if (toBase < bestD) {
@@ -799,7 +812,11 @@ public final class BedwarsBrain extends BotBrain {
             return true;
         }
         // 3) Bow.
-        if (sees && dist <= 32 && findArrowCount() > 0 && shoot(e, st -> st.is(Items.BOW), 20, false, true)) {
+        // 5.19: long shots spread more (none up to 12 blocks, about 1.2 blocks at 32).
+        shotSpread = Math.max(0, (dist - 12) * BwStrategy.BRIDGER_SPREAD_PER_BLOCK);
+        boolean shooting = sees && dist <= BwStrategy.BRIDGER_SHOOT_RANGE && findArrowCount() > 0 && shoot(e, st -> st.is(Items.BOW), 20, false, true);
+        shotSpread = 0;
+        if (shooting) {
             doing = "shooting " + who + " off the bridge";
             return true;
         }
@@ -906,7 +923,7 @@ public final class BedwarsBrain extends BotBrain {
         boolean wantCloud = clouds == 0 && age - knockedOffAt < 5 * 60 * 20;
         boolean attacker = r == BwStrategy.Role.RUSHER || r == BwStrategy.Role.HUNTER;
         return new BwStrategy.Me(r, res[0], res[1], res[2], res[3], g[0], g[1], g[2], g[3], g[4] == 1,
-                countBlocks(), strong, fireballs, bow, arrows, gapples, minute(), builder ? missingDefence().size() : 0,
+                countBlocks(), strong, fireballs, bow, arrows, gapples, minute(), builder ? missingDefence().size() + (woolToReplace() != null ? 8 : 0) : 0,
                 BedwarsBots.bedBell(team), home, coverTime(), bridgers, attacker ? targetDefence() : 0, pearls, tnt, wantCloud, endstone);
     }
 
@@ -1338,11 +1355,59 @@ public final class BedwarsBrain extends BotBrain {
     // Bed defence and the end stone cover
     // =====================================================================
 
-    /** Time for the end stone cover: Forge II and the Healing Spring bought, around the learned minute. */
+    /**
+     * Time for the end stone cover. 5.19: at about minute 5 (it used to wait for Forge II and the Healing
+     * Spring, around minute 8-13). From then on the bed's wool is also swapped for end stone.
+     */
     private boolean coverTime() {
         if (team == null) return false;
-        double m = minute();
-        return BwStrategy.vitalUpgradesDone(BedwarsBots.upgradeLevels(team)) && m >= Math.max(7, BwLearning.coverMinute() - 2) || m >= BwLearning.coverMinute() + 3;
+        return minute() >= BwStrategy.COVER_MINUTE;
+    }
+
+    /** 5.19: a wool block in our bed defence that an enemy could reach (it has an open side), or null. */
+    private BlockPos woolToReplace() {
+        if (!coverTime() || !BedwarsBots.bedAlive(team)) return null;
+        BlockPos foot = BedwarsBots.bedFoot(team), head = BedwarsBots.bedHead(team);
+        for (BlockPos c : defenceCells()) {
+            if (skipCell.containsKey(c.asLong()) || !BedwarsBots.isPlaced(c)) continue;
+            BlockState s = level().getBlockState(c);
+            if (!net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(s.getBlock()).getPath().endsWith("_wool")) continue;
+            boolean open = false;
+            for (Direction d : Direction.values()) {
+                BlockPos n = c.relative(d);
+                if (n.equals(foot) || n.equals(head)) continue;
+                BlockState ns = level().getBlockState(n);
+                if (ns.isAir() || ns.canBeReplaced()) {
+                    open = true;
+                    break;
+                }
+            }
+            if (open) return c;
+        }
+        return null;
+    }
+
+    /** 5.19: walks to a wool block in the defence and breaks it (buildDefence then puts end stone there). */
+    private void replaceWool(BlockPos cell) {
+        BlockPos stand = standSpotFor(cell);
+        if (stand == null) {
+            skipCell.put(cell.asLong(), age + 600);
+            return;
+        }
+        doing = "swapping the bed's wool for end stone";
+        if (bot.getEyePosition().distanceTo(Vec3.atCenterOf(cell)) > 4.3 || bot.blockPosition().distManhattan(stand) > 1) {
+            if (goTo(stand, Pathfinder.near(stand.getX(), stand.getY(), stand.getZ(), 0.5), homeOptions()) == PathStatus.STUCK)
+                skipCell.put(cell.asLong(), age + 400);
+            return;
+        }
+        if (mine(cell) && level().getBlockState(cell).isAir()) log("DEFENCE", "broke wool at " + cell.toShortString() + " to put end stone there");
+    }
+
+    private int endstoneCount() {
+        int n = 0;
+        Inventory inv = bot.getInventory();
+        for (int i = 0; i < 36; i++) if (inv.getItem(i).is(Items.END_STONE)) n += inv.getItem(i).getCount();
+        return n;
     }
 
     private int layers() {
@@ -1458,6 +1523,7 @@ public final class BedwarsBrain extends BotBrain {
         }
         int ring = ringOf(next);
         int mode = ring >= 3 ? 2 : (ring <= 1 && next.getY() <= foot.getY() + 1) ? 0 : 1; // 0 wool, 1 strong, 2 end stone cover
+        if (coverTime()) mode = 2; // 5.19: from cover time on, end stone everywhere (wool is being swapped out)
         BlockPos stand = standSpotFor(next);
         if (stand == null) {
             skipCell.put(next.asLong(), age + 600);

@@ -169,15 +169,15 @@ public final class SkywarsGame {
     public static void join(ServerPlayer player) {
         UUID id = player.getUUID();
         if (players.containsKey(id)) {
-            msg(player, "§eYou're already in Skywars. Use /sw leave to quit.");
+            msg(player, "§eYou're already in Skywars. Use /leave to quit.");
             return;
         }
         if (GoldWarsGame.isInGame(id)) {
-            msg(player, "§cLeave Gold Wars first with /gw leave.");
+            msg(player, "§cLeave Gold Wars first with /leave.");
             return;
         }
         if (com.aidan.skyserver.bedwars.BedwarsGame.isInGame(id)) {
-            msg(player, "§cLeave Bedwars first with /bw leave.");
+            msg(player, "§cLeave Bedwars first with /leave.");
             return;
         }
         if (com.aidan.skyserver.lobby.Lobby.level() != null && !com.aidan.skyserver.lobby.Lobby.isLobby(player.level())) {

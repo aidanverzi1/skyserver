@@ -187,13 +187,27 @@ public final class IslandQuests {
         }
     }
 
-    /** Right-clicked Captain Wren. */
+    /**
+     * Right-clicked Captain Wren. 5.20: members get Wren's menu (quests and every expedition), except the very
+     * first talk (his introduction and the starter animals), which goes straight to the quests.
+     */
     static void talk(ServerPlayer p, Islands.Island is) {
         if (is == null) return;
         if (!is.isMember(p.getUUID())) {
-            say(p, "Ahoy, visitor! This isn't your island, but you're welcome to look around.");
+            say(p, "Ahoy, visitor! This isn't your island, but you're welcome to look around."
+                    + (WrenRoom.hasRoom(is) ? " If you're sailing with this crew, the Tribute Chests are at the back." : ""));
             return;
         }
+        if (is.herd && is.quest != 0) {
+            WrenMenu.open(p);
+            return;
+        }
+        questTalk(p, is);
+    }
+
+    /** Wren's quest talk (the old right-click). */
+    public static void questTalk(ServerPlayer p, Islands.Island is) {
+        if (is == null) return;
         if (!is.herd) {
             is.herd = true;
             giveHerd(p);
@@ -202,10 +216,6 @@ public final class IslandQuests {
                 Lobby.msg(p, "§a+2 sheep, 2 cows, 2 chickens §7(feed two of a kind to breed them; shears and buckets for wool and milk)");
             }
             Islands.save();
-        }
-        if (com.aidan.skyserver.expedition.Expedition.hasShip(is)) { // 5.8: the airship is docked above the island
-            com.aidan.skyserver.expedition.Expedition.offerBoard(p);
-            return;
         }
         if (is.quest == 0) {
             say(p, "Ahoy there! I'm Captain Wren. My airship crashed on these islands long ago, and I've been waiting for someone like you.");
@@ -254,7 +264,7 @@ public final class IslandQuests {
         if (is == null) {
             Lobby.msg(p, "§7You don't have an island yet. Type §e/is§7.");
         } else if (is.quest == 0) {
-            Lobby.msg(p, "§7Talk to §6Captain Wren §7(by the path on your island) to start his quests.");
+            Lobby.msg(p, "§7Talk to §6Captain Wren §7(in his ship room, or by the path) to start his quests.");
         } else if (is.quest > STEPS.size()) {
             Lobby.msg(p, "§6You're a Legend of the Skies: §ayou've finished all of Captain Wren's quests!");
         } else {
@@ -521,6 +531,10 @@ public final class IslandQuests {
     /** /is movewren: Wren moves to where the player is standing (owner or co-op member, on their own island). */
     static void moveWren(ServerPlayer p) {
         Islands.Island is = Islands.islandOf(p.getUUID());
+        if (WrenRoom.hasRoom(is)) { // 5.20: he lives in his ship room now
+            Lobby.msg(p, "§6[Captain Wren] §fI'm not leaving my cabin, captain! §7Move the whole ship with §e/is shiproom place§7.");
+            return;
+        }
         if (is == null || !Islands.isIsland(p.level()) || Islands.islandAt(p.getX(), p.getZ()) != is || !is.inBorder(p.getX(), p.getZ())) {
             Lobby.msg(p, "§cStand on your own island (inside the border) where you want Captain Wren to stand.");
             return;

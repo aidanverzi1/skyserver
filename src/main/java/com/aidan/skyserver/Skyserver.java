@@ -25,7 +25,9 @@ public class Skyserver implements ModInitializer {
         com.aidan.skyserver.lobby.CosmeticsPlus.init();   // 5.13: cages, bed-break effects, name colours (after BattlePass: wraps /cosmetics)
         com.aidan.skyserver.lobby.Ranks.init();           // 5.7: level/prestige tags, titles, trails (5.9: [MOD] tag)
         com.aidan.skyserver.lobby.EconomyReport.init();   // 5.7: /ss economy
-        com.aidan.skyserver.lobby.Boosters.init();        // 5.8: /boosters
+        com.aidan.skyserver.lobby.Boosters.init();        // 5.8: /boosters (5.19: server-wide, /tip)
+        com.aidan.skyserver.lobby.KillStreaks.init();     // 5.19: kill streak glow + bounties (BW/SW/GW)
+        com.aidan.skyserver.lobby.Charts.init();          // 5.19: Wren's Charts (/charts)
         com.aidan.skyserver.lobby.ShardShop.init();       // 5.8: /shards
         com.aidan.skyserver.lobby.CosmeticShop.init();    // 5.8: /cshop
         com.aidan.skyserver.lobby.Voyage.init();          // 5.13: Wren's Weekly Voyage (/voyage)
@@ -44,6 +46,7 @@ public class Skyserver implements ModInitializer {
         com.aidan.skyserver.bedwars.BedwarsGame.init();
         com.aidan.skyserver.bedwars.BwVoyage.init();      // 5.13: Voyage twists for Bedwars (after BedwarsGame, before BwForge)
         com.aidan.skyserver.bedwars.BwForge.init();       // 5.12: shared team forges (must come after BedwarsGame)
+        com.aidan.skyserver.lobby.Shortcuts.init();       // 5.19: short commands (last: a bare /gw /bw /sw must win over the games' own)
         LOGGER.info("SkyServer loaded!");
     }
 }

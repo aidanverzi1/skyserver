@@ -1,0 +1,18 @@
+{
+  "type": "skyserver:ancient_city",
+  "generator": {
+    "type": "minecraft:flat",
+    "settings": {
+      "biome": "minecraft:deep_dark",
+      "features": false,
+      "lakes": false,
+      "layers": [
+        {
+          "block": "minecraft:air",
+          "height": 1
+        }
+      ],
+      "structure_overrides": []
+    }
+  }
+}

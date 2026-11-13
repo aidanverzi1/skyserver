@@ -214,9 +214,12 @@ public final class Progression {
     /**
      * 5.9: titles you can only earn (never in chests, shops or the pass).
      * title_conqueror = first Nightmare Nether Expedition clear.
+     * 5.19: title_cartographer = Wren's Charts complete; title_silent = first Nightmare Ancient City escape.
+     * 5.20: title_tidebreaker = first Nightmare Sunken Monument clear.
      */
     public static final String[][] EARNED_TITLES = {
-            {"title_conqueror", "§4§l✦Nether Conqueror"}};
+            {"title_conqueror", "§4§l✦Nether Conqueror"}, {"title_cartographer", "§6§l✎Wren's Cartographer"},
+            {"title_silent", "§3§l✦The Silent"}, {"title_tidebreaker", "§b§l✦Tidebreaker"}};
 
     /** All cosmetics the pass hands out, in the order they appear (rotated each season). */
     public static List<String> cosmeticPool() {
