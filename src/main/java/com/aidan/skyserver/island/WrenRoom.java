@@ -53,6 +53,8 @@ public final class WrenRoom {
     private static final int[] LECTERN = {-6, 1, -3}, MAP_TABLE = {-6, 1, 3};
     /** Wren at the helm (local x, y, z, yaw) and where people stand when they arrive. */
     private static final double[] WREN = {6.5, 1, 0.5, 90}, LANDING = {0.5, 1, 2.5, 180};
+    /** 5.21: Old Ves (City Cash market) stands by the door, facing into the cabin. */
+    private static final double[] VES = {-3.5, 1, 2.5, 180};
     /** The protected box (local, inclusive). */
     private static final int BX0 = -8, BX1 = 11, BY0 = -3, BY1 = 15, BZ0 = -4, BZ1 = 4;
     /** Where the room goes on a brand-new island (relative to the island centre) and its rotation. */
@@ -200,6 +202,12 @@ public final class WrenRoom {
         }
         int[] l = local(is.wrenRoom, BlockPos.containing(x, y, z));
         return l[0] >= -7 && l[0] <= 7 && l[2] >= -3 && l[2] <= 3 && l[1] >= 1 && l[1] <= 4;
+    }
+
+    /** 5.21: puts Old Ves in the ship room (or takes him away when there's no room). Called whenever Wren is checked. */
+    public static void checkVes(ServerLevel level, Islands.Island is) {
+        if (is == null) return;
+        com.aidan.skyserver.expedition.CityMarket.ensureVes(level, is, is.wrenRoom == null ? null : worldSpot(is.wrenRoom, VES));
     }
 
     /** Where people arrive in the room {x, y, z, yaw} (or next to Wren without a room). */

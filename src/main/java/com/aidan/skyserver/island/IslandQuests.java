@@ -499,6 +499,7 @@ public final class IslandQuests {
 
     /** Puts Wren on the island if he isn't there (new islands, or islands made before he existed). */
     static void ensureWren(ServerLevel level, Islands.Island is) {
+        com.aidan.skyserver.Safe.run("ves check", () -> WrenRoom.checkVes(level, is)); // 5.21: Old Ves lives in the ship room
         double[] w = wrenSpot(is);
         double x = w[0], y = w[1], z = w[2];
         if (!level.isLoaded(BlockPos.containing(x, y, z))) return;

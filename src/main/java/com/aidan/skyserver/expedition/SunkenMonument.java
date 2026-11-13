@@ -181,6 +181,9 @@ public final class SunkenMonument {
         final List<BlockPos> bellBlocks = new ArrayList<>();
         long nextToll, nextInk, rageUntil = 0, nextBeam = 0, beamAt = -1, nextHelpers = 0, nextPassageGuards = 0;
         ServerBossEvent bar;
+        /** 5.21: an op's test trip (/sunken admin test): no fare, no rewards, test commands work. testCrew = crew size it pretends to have. */
+        boolean test = false, god = false;
+        int testCrew = 1;
 
         Run(int id, int diff, int islandId, UUID leader) {
             this.id = id;
@@ -298,6 +301,7 @@ public final class SunkenMonument {
                 }
                 if (source.getEntity() instanceof Player) return false; // no player-vs-player
                 Run run = runOf(p.getUUID());
+                if (run != null && run.test && run.god) return false; // 5.21: test trip god mode
                 return run == null || run.layout == null || !run.layout.inDock(p.getX(), p.getY(), p.getZ()); // the dock is safe
             }
             return true;
@@ -391,6 +395,19 @@ public final class SunkenMonument {
                 .then(Commands.literal("giveup").executes(c -> { giveUp(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("help").executes(c -> { help(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("admin").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        // 5.21: op test mode.
+                        .then(Commands.literal("test").then(Commands.argument("difficulty", IntegerArgumentType.integer(0, 3))
+                                .executes(c -> { startTest(c.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(c, "difficulty"), 1); return 1; })
+                                .then(Commands.argument("crew", IntegerArgumentType.integer(1, CREW_MAX))
+                                        .executes(c -> { startTest(c.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(c, "difficulty"),
+                                                IntegerArgumentType.getInteger(c, "crew")); return 1; }))))
+                        .then(Commands.literal("skip").executes(c -> { testSkip(c.getSource().getPlayerOrException(), false); return 1; }))
+                        .then(Commands.literal("wing").executes(c -> { testSkip(c.getSource().getPlayerOrException(), true); return 1; }))
+                        .then(Commands.literal("vault").executes(c -> { testVault(c.getSource().getPlayerOrException(), false); return 1; }))
+                        .then(Commands.literal("boss").executes(c -> { testVault(c.getSource().getPlayerOrException(), true); return 1; }))
+                        .then(Commands.literal("god").executes(c -> { testGod(c.getSource().getPlayerOrException()); return 1; }))
+                        .then(Commands.literal("time").then(Commands.argument("minutes", IntegerArgumentType.integer(1, 120))
+                                .executes(c -> { testTime(c.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(c, "minutes")); return 1; })))
                         .then(Commands.literal("end").executes(c -> {
                             int n = RUNS.size() + MUSTERS.size();
                             for (Run rn : new ArrayList<>(RUNS)) {
@@ -663,8 +680,8 @@ public final class SunkenMonument {
         double[] at = run.layout.landing;
         for (UUID id : run.crew) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
-            if (p == null || !Islands.isIsland(p.level())) {
-                if (host != null) Tribute.giveBack(run.islandId, id, run.fares.remove(id));
+            if (p == null || (!run.test && !Islands.isIsland(p.level()))) {
+                if (host != null && !run.test) Tribute.giveBack(run.islandId, id, run.fares.remove(id));
                 if (p != null) Lobby.msg(p, "§7You weren't on your island when the crew dived - your fare is back in the Tribute Chests.");
                 continue;
             }
@@ -679,6 +696,10 @@ public final class SunkenMonument {
             return;
         }
         run.crewSize = Math.max(1, Math.min(CREW_MAX, run.inside.size()));
+        if (run.test) {
+            run.crewSize = run.testCrew;
+            for (ServerPlayer p : inside(run)) testHelp(p);
+        }
         for (ServerPlayer p : inside(run)) help(p);
         offerGates(run);
         Skyserver.LOGGER.info("[Sunken] trip #{} started with {} player(s)", run.id, run.inside.size());
@@ -1324,6 +1345,121 @@ public final class SunkenMonument {
     }
 
     // =====================================================================
+    // 5.21: op test mode (/sunken admin test <difficulty> [crew])
+    // =====================================================================
+
+    /** Starts a test trip for this op right away: no fare, no ship room, no muster, no rewards. */
+    static void startTest(ServerPlayer p, int d, int crew) {
+        if (runOf(p.getUUID()) != null || musterOf(p.getUUID()) != null) {
+            Lobby.msg(p, "§7You're already on a Sunken Monument trip (/sunken admin end).");
+            return;
+        }
+        ServerLevel l = level();
+        if (l == null) {
+            Lobby.msg(p, "§cThe Sunken Monument world isn't loaded.");
+            return;
+        }
+        Islands.Island is = Islands.islandOf(p.getUUID());
+        Run run = new Run(runCounter++, d, is == null ? -1 : is.id, p.getUUID());
+        run.test = true;
+        run.testCrew = Math.max(1, Math.min(CREW_MAX, crew));
+        run.crew.add(p.getUUID());
+        run.crewSize = run.testCrew;
+        BlockPos center = new BlockPos(2_000 + (run.id % 16) * 300, SunkenMap.FLOOR_Y, 2_000 + (run.id / 16) * 300);
+        run.layout = SunkenMap.plan(l, center, run.diff, RNG);
+        for (SunkenMap.Current c : run.layout.currents) c.trap = RNG.nextInt(100) < 30;
+        run.timeLimit = (int) Math.round(TIME_LIMITS[run.diff] * TIME_MULT[run.crewSize - 1]);
+        RUNS.add(run);
+        Lobby.msg(p, "§b[Test] §7Building a " + DIFF_COLORS[d] + DIFF_NAMES[d] + " §7monument scaled for a crew of §f" + run.testCrew + "§7...");
+        Skyserver.LOGGER.info("[Sunken] TEST trip #{} ({}, crew size {}) by {}", run.id, DIFF_NAMES[d], run.testCrew, p.getName().getString());
+    }
+
+    private static void testHelp(ServerPlayer p) {
+        Lobby.msg(p, "§b§l[TEST TRIP] §7No fare taken; room chests still give loot (to check it), the clear pays nothing. Op commands: §e/sunken admin skip §7(clear the room you're fighting), "
+                + "§e/sunken admin wing §7(clear the open wing), §e/sunken admin vault §7(open the vault), §e/sunken admin boss §7(the Tidemother now), "
+                + "§e/sunken admin god §7(no damage), §e/sunken admin time <min>§7, §e/sunken admin end§7.");
+    }
+
+    private static Run testRun(ServerPlayer p) {
+        Run run = runOf(p.getUUID());
+        if (run == null || !run.test || run.building || run.over) {
+            Lobby.msg(p, "§7That only works on your own test trip (§e/sunken admin test <difficulty> [crew]§7).");
+            return null;
+        }
+        return run;
+    }
+
+    /** Clears the active room of the open wing (or every room of it with wholeWing). */
+    static void testSkip(ServerPlayer p, boolean wholeWing) {
+        Run run = testRun(p);
+        if (run == null) return;
+        ServerLevel l = level();
+        if (run.openWing < 0) {
+            Lobby.msg(p, "§7No wing is open - open a floodgate first (talk to Wren), or use §e/sunken admin vault§7.");
+            return;
+        }
+        int n = 0;
+        for (SunkenMap.Room r : run.layout.rooms) {
+            if (r.wing != run.openWing || r.cleared) continue;
+            if (!wholeWing && !r.active) continue;
+            for (UUID g : r.guards) {
+                Entity e = l.getEntity(g);
+                if (e != null) e.discard();
+                GUARD_OF.remove(g);
+            }
+            r.guards.clear();
+            r.active = true;
+            r.wave = 2;
+            roomCleared(l, run, r);
+            n++;
+            if (!wholeWing) break;
+        }
+        Lobby.msg(p, n == 0 ? "§7No room is being fought right now - walk into one, or use §e/sunken admin wing§7." : "§b[Test] §7Cleared " + n + " room(s).");
+    }
+
+    /** Opens the vault (marks every wing done), and with boss also raises the Tidemother. */
+    static void testVault(ServerPlayer p, boolean boss) {
+        Run run = testRun(p);
+        if (run == null) return;
+        ServerLevel l = level();
+        if (!run.vaultOpen) {
+            for (SunkenMap.Room r : run.layout.rooms) {
+                for (UUID g : r.guards) {
+                    Entity e = l.getEntity(g);
+                    if (e != null) e.discard();
+                    GUARD_OF.remove(g);
+                }
+                r.guards.clear();
+                if (!r.cleared) {
+                    r.active = true;
+                    r.wave = 2;
+                    roomCleared(l, run, r);
+                }
+            }
+            run.wingDone[0] = run.wingDone[1] = run.wingDone[2] = true;
+            run.openWing = -1;
+            openVault(l, run);
+        }
+        if (boss && !run.bossUp) bossRises(l, run);
+        Lobby.msg(p, "§b[Test] §7" + (boss ? "The Tidemother is up." : "The vault gate is open."));
+    }
+
+    static void testGod(ServerPlayer p) {
+        Run run = testRun(p);
+        if (run == null) return;
+        run.god = !run.god;
+        Lobby.msg(p, "§b[Test] §7God mode " + (run.god ? "§aON" : "§cOFF") + "§7.");
+    }
+
+    static void testTime(ServerPlayer p, int minutes) {
+        Run run = testRun(p);
+        if (run == null) return;
+        run.timeLimit = (int) ((ticks - run.startTick) / 20) + minutes * 60;
+        run.warned = 0;
+        Lobby.msg(p, "§b[Test] §7" + minutes + " minutes left.");
+    }
+
+    // =====================================================================
     // Winning
     // =====================================================================
 
@@ -1331,6 +1467,18 @@ public final class SunkenMonument {
         if (run.over || run.won) return;
         run.won = true;
         int d = run.diff;
+        if (run.test) { // 5.21: test trips pay nothing
+            for (ServerPlayer m : inside(run)) {
+                removeSponges(m);
+                Lobby.msg(m, "§b§lTEST CLEAR! §7(" + DIFF_NAMES[d] + ", crew size " + run.crewSize + ", bell " + (run.bellLost ? "lost" : "afloat")
+                        + ", " + ((ticks - run.startTick) / 20 / 60) + " min) §8No rewards on a test trip.");
+            }
+            Lobby.runLaterTicks(5 * 20, () -> Safe.run("sunken test home", () -> {
+                for (ServerPlayer m : inside(run)) if (!DOWNED.containsKey(m.getUUID())) extract(m, "§6[Captain Wren] §fTest over, captain.");
+                endRun(run, "test clear");
+            }));
+            return;
+        }
         for (ServerPlayer m : inside(run)) {
             if (DOWNED.containsKey(m.getUUID())) continue;
             removeSponges(m);

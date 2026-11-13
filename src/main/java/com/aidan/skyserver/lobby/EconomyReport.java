@@ -108,6 +108,7 @@ public final class EconomyReport {
         section(out, "§eToday", day);
         section(out, "§eLast 7 days", week);
         out.add("§7Target: about §f$2,500 §7per hour of active play per player. Numbers to tune are in Rewards.java and Progression.java.");
+        out.addAll(com.aidan.skyserver.expedition.CityMarket.reportLines()); // 5.21: City Cash
         return out;
     }
 

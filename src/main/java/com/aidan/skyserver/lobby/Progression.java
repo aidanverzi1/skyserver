@@ -219,7 +219,10 @@ public final class Progression {
      */
     public static final String[][] EARNED_TITLES = {
             {"title_conqueror", "§4§l✦Nether Conqueror"}, {"title_cartographer", "§6§l✎Wren's Cartographer"},
-            {"title_silent", "§3§l✦The Silent"}, {"title_tidebreaker", "§b§l✦Tidebreaker"}};
+            {"title_silent", "§3§l✦The Silent"}, {"title_tidebreaker", "§b§l✦Tidebreaker"},
+            // 5.21: Ancient City - all 6 Ancient Shards; Old Ves's stall (City Cash). trail_sculk is a trail, named here.
+            {"title_archivist", "§3§l✎Archivist of the Deep"}, {"title_whisper", "§3Whisper"}, {"title_hollow_saint", "§3§l✦Hollow Saint"},
+            {"trail_sculk", "§aSculk Soul Trail"}};
 
     /** All cosmetics the pass hands out, in the order they appear (rotated each season). */
     public static List<String> cosmeticPool() {

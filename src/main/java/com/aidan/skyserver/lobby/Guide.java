@@ -24,6 +24,7 @@ import java.util.List;
  * kill streak bounties, Bedwars armor dropping a tier, the Nether's trapped gold, and new pages for
  * boosters & /tip, the End, the Ancient City and Wren's Charts.
  * 5.20: Captain Wren's ship room (/is shiproom) and the Sunken Monument pages; expeditions start with Wren.
+ * 5.21: the Ancient City page rewritten (noise meter, rope, compass); new City Cash page (28).
  */
 public final class Guide {
     private Guide() {}
@@ -37,7 +38,7 @@ public final class Guide {
                     "§2Island extras§0 .. 16", "§6Events§0 .......... 17", "§aTown people§0 ... 18",
                     "§cNether trips§0 ... 19", "§dShards & more§0 . 20", "§6Wren's Voyage§0 . 21",
                     "§dBoosters & tips§0 22", "§5The End§0 .......... 23", "§3Ancient City§0 ... 24", "§6Wren's Charts§0 . 25",
-                    "§6Ship room§0 ...... 26", "§bSunken Monument 27"},
+                    "§6Ship room§0 ...... 26", "§bSunken Monument 27", "§3City Cash§0 ...... 28"},
             {"§2§lSky Island§r", "", "§l/is§r", "go to your island", "(made the first time)", "",
                     "§l/is menu§r", "upgrades, size, info", "", "§l/is challenges§r", "goals with rewards", "",
                     "§l/is sethome§r", "set where you appear"},
@@ -96,15 +97,17 @@ public final class Guide {
                     "§l/tip§r thanks whoever", "used it: you pay $200,", "the server adds $50.", "§l/boosters gift <name>§r", "give one to a friend."},
             {"§5§lThe End§r", "", "Talk to §lWren§r -> End", "Expedition: $15,000", "or an End ticket.", "§5Full netherite only!§0", "Press the button to",
                     "start each wave.", "Mini boss every 5,", "boss every 10.", "§l/voidshop§r spend", "Void Fragments", "(on your island)."},
-            {"§3§lAncient City§r", "", "§lWren§r -> Ancient City", "§a$5k §e$10k §c$20k §4$40k", "Sneak to the houses,", "take the relic from",
-                    "the frame, bring it", "back to Wren's lift.", "Sculk hears you!", "Grey carpet = quiet.", "The §lWarden§r can't", "be killed - hide!",
-                    "Mole game (opt-in):", "§l/city accuse <name>§r"},
+            {"§3§lAncient City§r", "", "§lWren§r -> Ancient City", "Bring a recovery", "compass! Crouch on", "carpet = silent.",
+                    "Noise 100% = lose", "EVERYTHING. Lit", "candles = real house.", "Take the relic, then", "follow the compass to", "Wren's rope.",
+                    "§l/city top§r leaderboard", "New map each Thursday"},
             {"§6§lWren's Charts§r", "", "§l/charts§r", "A stamp for every", "expedition at every", "difficulty (the End:", "waves 10, 20, 30).", "",
                     "Fill the whole chart", "for the §6Cartographer§0", "title and a", "Legendary key!"},
             {"§6§lShip room§r", "", "Captain Wren lives in", "his pirate ship room.", "Talk to him for quests", "and EVERY expedition.", "",
                     "§l/is shiproom§r go there", "§l/is shiproom place§r", "put / move it (stand", "at the door, face", "the ship). Tribute", "Chests + the desk."},
             {"§b§lSunken Monument§r", "", "Fare = farm items in", "the Tribute Chests.", "Drain rooms: right-", "click the §lpump§r.", "Crouch to plug leaks.",
                     "Push Wren's diving", "bell to the vault and", "beat the Tidemother!", "§a$5k §e$11.5k §c$19k §4$35k", "(half after 2 a day)"},
+            {"§3§lCity Cash§r", "", "Earned escaping the", "Ancient City. Spend it", "at §lOld Ves§r in Wren's", "ship room: gear,",
+                    "books, discs, trims.", "§l/cc§r your balance", "Weekly requests and", "a 25%-off find.", "Pays for City trips:", "§b1k 2k 4k 8k CC", ""},
             {"§l§nRules§r", "", "Be kind in chat.", "No cheats or hacks.", "No scamming trades.", "", "Have fun!", "",
                     "§l/guide§r opens this", "book again."}
     };

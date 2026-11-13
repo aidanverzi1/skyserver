@@ -72,6 +72,13 @@ public final class Charts {
         }
     }
 
+    /** 5.21: does this player have this stamp? (Old Ves's shelves unlock with Ancient City stamps.) */
+    public static boolean has(UUID id, String stamp) {
+        load();
+        Set<String> mine = DATA.get(id);
+        return mine != null && mine.contains(stamp);
+    }
+
     private static int count(Set<String> mine) {
         int n = 0;
         for (String[] s : STAMPS) if (mine.contains(s[0])) n++;
