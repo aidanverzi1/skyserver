@@ -17,7 +17,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import java.util.*;
 
 /**
- * 5.21: the Ancient City Expedition's map - a 201 x 201 deepslate MAZE, built fresh for every trip in its own
+ * 5.21: the Ancient City Expedition's map - a 125 x 125 deepslate MAZE (5.22; was 201 x 201), built fresh for every trip in its own
  * world (skyserver:ancient_city, deep dark biome: nothing spawns there by itself).
  *
  * THREE FIXED MAPS rotate weekly (CityMarket.mapIndex(): map 1, 2, 3, 1... switching Thursday 00:00 Eastern).
@@ -39,18 +39,18 @@ import java.util.*;
 final class AncientCityMap {
     private AncientCityMap() {}
 
-    static final int FLOOR_Y = 64, R = 100, HEIGHT = 7, DOME = 20, DOME_HEIGHT = 16;
+    static final int FLOOR_Y = 64, R = 62, HEIGHT = 7, DOME = 20, DOME_HEIGHT = 16;
     /** Grid: one cell every P blocks (3 air + 1 wall), N cells a side. */
-    static final int P = 4, N = 50;
+    static final int P = 4, N = 31;
     /** Real houses / decoys per trip (the rest of the 14 spots are sealed). */
     static final int[] HOUSES = {5, 6, 7, 8}, DECOYS = {3, 4, 5, 6};
     static final int HOUSE_SPOTS = 14;
-    static final int[] SENSORS = {90, 120, 160, 200};
-    static final int[] SHRIEKERS = {10, 14, 18, 24};
-    static final int[] SCULK_PATCHES = {30, 40, 50, 60};
-    static final int[] URNS = {15, 20, 25, 30};
+    static final int[] SENSORS = {35, 45, 60, 80};
+    static final int[] SHRIEKERS = {6, 8, 10, 12};
+    static final int[] SCULK_PATCHES = {12, 16, 20, 24};
+    static final int[] URNS = {8, 10, 12, 14};
     /** Chance (%) a carpeted cell of a route has no carpet (you cross bare floor there). */
-    static final int[] CARPET_GAPS = {20, 35, 50, 65};
+    static final int[] CARPET_GAPS = {15, 27, 40, 55};
     /** The three fixed map seeds. */
     static final long[] SEEDS = {0x5C17A1L, 0xDEE9C17L, 0xA4C1E47L};
     private static final int FLAGS = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE;
@@ -524,6 +524,17 @@ final class AncientCityMap {
                 }
             }
         }
+        // 5.22: a route straight from the relic to each rope shaft too (the escape no longer doubles back past the lift).
+        for (int[] t : shaftCells) {
+            List<int[]> p = path(m, N / 2, N / 2, t[0], t[1]);
+            for (int k = 0; k < p.size(); k++) {
+                routeCells.add(key(p.get(k)[0], p.get(k)[1]));
+                if (k > 0) {
+                    routeEdges.add(edge(p.get(k - 1), p.get(k)));
+                    routeEdges.add(edge(p.get(k), p.get(k - 1)));
+                }
+            }
+        }
         List<int[]> gapCells = new ArrayList<>();
         for (long rc : routeCells) {
             int i = (int) (rc >> 16), j = (int) (rc & 0xFFFF);
@@ -688,6 +699,8 @@ final class AncientCityMap {
         int fy = FLOOR_Y;
         int x0 = line(i) + 1, z0 = line(j) + 1; // interior x0..x0+6, z0..z0+6
         for (int x = 0; x < 7; x++) for (int z = 0; z < 7; z++) set(c, cx + x0 + x, fy - 1, cz + z0 + z, polished);
+        // 5.22: a glowstone block in the middle of every room's ceiling (real, decoy and sealed alike - the candles are still the tell).
+        set(c, cx + x0 + 3, fy + HEIGHT, cz + z0 + 3, b("glowstone"));
         // Door: on a side whose outside cell is a maze or plaza cell (fixed per house, by its own random).
         List<int[]> options = new ArrayList<>(); // {dir, cellI, cellJ, insideI, insideJ}
         for (int a = 0; a < 2; a++) {

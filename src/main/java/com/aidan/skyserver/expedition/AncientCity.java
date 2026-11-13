@@ -68,7 +68,7 @@ import java.nio.file.*;
 import java.util.*;
 
 /**
- * 5.19 / 5.21: the ANCIENT CITY EXPEDITION - a stealth trip through a 201 x 201 deepslate maze (AncientCityMap).
+ * 5.19 / 5.21: the ANCIENT CITY EXPEDITION - a stealth trip through a 125 x 125 deepslate maze (AncientCityMap).
  *
  * HOW A TRIP GOES (5.21)
  *  - Talk to Captain Wren -> Ancient City. Price per player: $5k / $10k / $20k / $40k, or 1,000 / 2,000 / 4,000 /
@@ -123,11 +123,13 @@ public final class AncientCity {
     // ---- The noise meter ----
     static final double[] NOISE_MULT = {0.6, 0.8, 1.0, 1.3};
     static final double CREW_ROOM = 0.35;
+    /** 5.22: the meter holds 110 raw points for one player (+10% on every difficulty). Milestones stay percentages. */
+    static final double BASE_CAP = 110;
     static final double WALK = 1.0, CROUCH = 0.3, CARPET_WALK = 0.2, CARPET_CROUCH = 0.0;
     /** Crouch noise on bare floor with Hush I / II / III boots. */
     static final double[] HUSH_CROUCH = {0.3, 0.27, 0.24, 0.20};
     static final double LAND = 2, PLACE = 2, LADDER = 1, BREAK = 8, PLUG = 12, BOOM = 6, SENSOR = 3, URN = 3, CHEST = 4, DECOY = 15,
-            SHRIEK = 15, HEART = 1, EAT = 1, HURT = 3, RATTLE = 1, THROW = 5, TONIC = 1;
+            SHRIEK = 15, HEART = 0.5, EAT = 1, HURT = 3, RATTLE = 1, THROW = 5, TONIC = 1;
     static final int[] HEARTBEAT_SECONDS = {8, 6, 5, 4};
     static final int[] MILESTONES = {25, 50, 75, 90, 100};
     static final int DECAY_SECONDS = 20, DARKNESS_EVERY = 20, SELF_SHRIEK_EVERY = 25, ROPE_PULL_SECONDS = 60, SILENT_PCT = 33;
@@ -181,7 +183,7 @@ public final class AncientCity {
         int timeLimit, warned = 0;
         UUID wren;
         // Noise.
-        double noise = 0, cap = 100;
+        double noise = 0, cap = BASE_CAP;
         int milestone = 0;
         long lastNoise = 0, nextDecay = 0, nextDarkness = -1, nextSelfShriek = -1, ropeDeadline = -1, nextHeartbeat = -1;
         final Map<UUID, Double> loud = new HashMap<>();
@@ -765,7 +767,7 @@ public final class AncientCity {
             endRun(run, "nobody boarded");
             return;
         }
-        run.cap = 100 * (1 + CREW_ROOM * (run.inside.size() - 1));
+        run.cap = BASE_CAP * (1 + CREW_ROOM * (run.inside.size() - 1));
         for (ServerPlayer p : inside(run)) help(p);
         for (int i = 0; i < ROAMING[run.diff]; i++) {
             BlockPos s = CityWardens.farSpot(run, 40);

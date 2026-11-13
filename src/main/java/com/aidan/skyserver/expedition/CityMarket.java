@@ -649,7 +649,7 @@ public final class CityMarket {
 
     static final String[] COND_TEXT = {"Escape with the noise meter at 33% or less", "Clean Sweep: loot every real house, open no decoy",
             "Loot the Deep Vault and escape", "Escape within %d minutes", "Break %d urns and escape", "Escape without anyone going down"};
-    static final int[] FAST_MIN = {14, 17, 21, 25}, URN_GOAL = {8, 10, 13, 16};
+    static final int[] FAST_MIN = {14, 17, 21, 25}, URN_GOAL = {5, 6, 8, 10};
 
     static String condText(Request r) {
         String t = COND_TEXT[r.cond()];
