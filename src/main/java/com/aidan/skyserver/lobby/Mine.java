@@ -46,7 +46,7 @@ public final class Mine {
     private static final Item[] DROPS = {Items.COAL, Items.RAW_IRON, Items.RAW_COPPER, Items.RAW_GOLD, Items.REDSTONE, Items.LAPIS_LAZULI, Items.DIAMOND, Items.EMERALD};
     private static final int[][] DROP_COUNT = {{1, 1}, {1, 1}, {2, 4}, {1, 1}, {3, 5}, {3, 6}, {1, 1}, {1, 1}};
     static final String[][] UNLOCK_TEXT = {{"5", "Iron in the Mine"}, {"10", "Copper in the Mine, an iron pickaxe"}, {"15", "Gold in the Mine"},
-            {"20", "Redstone in the Mine"}, {"25", "Lapis in the Mine"}, {"30", "a diamond pickaxe"}, {"35", "Diamonds in the Mine"},
+            {"20", "Redstone in the Mine"}, {"25", "Lapis in the Mine"}, {"30", "a diamond pickaxe, Diamonds in the Mine"},
             {"45", "a netherite pickaxe"}, {"50", "Emeralds in the Mine"}};
 
     /** 5.17: one ore per gallery every (regrow x this / count) seconds. 1.125 = the old average timer (1x to 1.25x). */
@@ -55,7 +55,7 @@ public final class Mine {
     // ---- 5.17 Gravel Pit (edit here) ----
     public static final int FLINT_CHANCE = 20;      // % per gravel block
     public static final int FLINT_PER_HOUR = 15;    // per player per clock hour
-    public static final int FLINT_XP = 12;          // Mining XP per flint (coal ore gives 36)
+    public static final int FLINT_XP = 4;           // Mining XP per flint (coal ore gives 13) - 5.23: was 12
     public static final int GRAVEL_REGROW_TICKS = 20;
     public static final int GRAVEL_COUNT = 20;
     static final int PIT_X1 = TownDesign.GALLERY_X0 - TownDesign.GALLERY_STEP;     // 214

@@ -108,13 +108,22 @@ public final class Islands {
     }
     /**
      * Generator speed: ticks before a mined block grows back, by speed level (1s, 0.75s, 0.5s).
-     * Faster speeds need a higher generator level and cost a lot. Income is limited by how fast a
-     * player can actually mine (about 2 blocks a second at best), so even the top speed can't make
-     * more than roughly $3,500 an hour - about what the Mine pays.
+     * Faster speeds need a higher generator level and cost a lot. With MAX_GENERATORS side by side a
+     * player can keep up with all of them (3 blocks a second at speed 0, 6 at the top speed).
+     * 5.23: Mining XP per generator block is divided by the speed (see genXpScale), so faster
+     * generators give more ore and money but the XP stays at ~10,000 an hour.
      */
     public static final int[] GEN_SPEED_TICKS = {20, 15, 10};
     public static final long[] GEN_SPEED_PRICES = {0, 25_000, 75_000};
     public static final int[] GEN_SPEED_NEEDS_LEVEL = {0, 3, 5};
+
+    /** 5.23: Mining XP per generator block (before the skill rate): cobble/stone, common ores, diamond/emerald. */
+    public static final double GEN_XP_STONE = 0.7, GEN_XP_ORE = 3, GEN_XP_RARE = 10;
+
+    /** 5.23: 1.0 at speed 0, 0.75 at speed 1, 0.5 at speed 2 (same XP an hour at every speed). */
+    static double genXpScale(Island is) {
+        return regrowTicks(is) / (double) GEN_SPEED_TICKS[0];
+    }
 
     public static int regrowTicks(Island is) {
         return GEN_SPEED_TICKS[is == null ? 0 : Math.max(0, Math.min(GEN_SPEED_TICKS.length - 1, is.genSpeed))];
@@ -1368,7 +1377,7 @@ public final class Islands {
                 if (si != null) si.spawners.remove(pos.asLong());
             }
             if (player instanceof ServerPlayer sp) Quests.progress(sp, "island_break", 1);
-            if (player instanceof ServerPlayer sp) skillForBreak(sp, state);
+            if (player instanceof ServerPlayer sp) skillForBreak(sp, (ServerLevel) level, pos, state);
         });
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
             if (!isIsland(level) || level.isClientSide() || !(player instanceof ServerPlayer sp)) return InteractionResult.PASS;
@@ -1425,6 +1434,7 @@ public final class Islands {
                             REGEN.put(target.above().asLong(), ticks + 20); // a moved/new generator starts by itself
                             dirty = true;
                         }
+                        if (after != before && tracksPlacement(after)) PLACED_CROPS.add(target.asLong()); // 5.23: no Farming XP for it
                         if (after != before && !after.isAir()) {
                             if (is != null && target.getY() < is.minY) {
                                 is.minY = target.getY();
@@ -1495,33 +1505,58 @@ public final class Islands {
     }
 
     /** Skill XP for something done on the islands; also counts toward the server level (capped, see Levels). */
-    private static void islandSkill(ServerPlayer p, Skills.Skill skill, int amount) {
+    private static void islandSkill(ServerPlayer p, Skills.Skill skill, double amount) {
         Skills.add(p, skill, amount);
         Levels.addIslandSkillXp(p, amount);
     }
 
+    /**
+     * 5.23: blocks a player placed that would otherwise give Farming XP when broken (melons, pumpkins,
+     * sugar cane, cactus, bamboo). Breaking one of these gives nothing. Not saved: after a restart a placed
+     * block counts once, which is harmless.
+     */
+    private static final Set<Long> PLACED_CROPS = new HashSet<>();
+
+    private static boolean tracksPlacement(BlockState s) {
+        Block b = s.getBlock();
+        return b == Blocks.MELON || b == Blocks.PUMPKIN || b instanceof SugarCaneBlock || b instanceof CactusBlock
+                || b instanceof BambooStalkBlock || b instanceof BambooSaplingBlock;
+    }
+
     /** Mining and Farming skill XP for blocks broken on the islands. */
-    private static void skillForBreak(ServerPlayer p, BlockState state) {
+    private static void skillForBreak(ServerPlayer p, ServerLevel level, BlockPos pos, BlockState state) {
         Block b = state.getBlock();
         String id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(b).getPath();
+        boolean placed = PLACED_CROPS.remove(pos.asLong());
         if (b instanceof CropBlock crop) {
-            if (crop.isMaxAge(state)) {
-                islandSkill(p, Skills.Skill.FARMING, 15);
-                PlayerStats.add(p, "harvest", 1);
-                BattlePass.event(p, "harvest", 1);
+            if (crop.isMaxAge(state)) farmed(p, 15);
+        } else if (b instanceof CocoaBlock) {
+            if (state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.AGE_2) >= 2) farmed(p, 8);
+        } else if (b instanceof NetherWartBlock) {
+            if (state.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.AGE_3) >= 3) farmed(p, 8);
+        } else if (b == Blocks.MELON || b == Blocks.PUMPKIN) {
+            if (!placed) farmed(p, 8);
+        } else if (b instanceof SugarCaneBlock || b instanceof CactusBlock || b instanceof BambooStalkBlock) {
+            // Only the part that grew: not a placed block, and not the bottom one (that one was planted).
+            if (!placed && level.getBlockState(pos.below()).is(b)) farmed(p, 8);
+        } else if (level.getBlockState(pos.below()).is(Blocks.LODESTONE)) {
+            // 5.23: Mining XP only for blocks that grew on a generator.
+            Island is = islandAt(pos.getX(), pos.getZ());
+            double scale = genXpScale(is);
+            if (id.endsWith("_ore")) {
+                islandSkill(p, Skills.Skill.MINING, (id.contains("diamond") || id.contains("emerald") ? GEN_XP_RARE : GEN_XP_ORE) * scale);
+                PlayerStats.add(p, "island_ore", 1);
+                BattlePass.event(p, "island_ore", 1);
+            } else if (b == Blocks.STONE || b == Blocks.COBBLESTONE || b == Blocks.DEEPSLATE || b == Blocks.ANDESITE || b == Blocks.TUFF) {
+                islandSkill(p, Skills.Skill.MINING, GEN_XP_STONE * scale);
             }
-        } else if (b == Blocks.MELON || b == Blocks.PUMPKIN || b instanceof SugarCaneBlock || b instanceof CactusBlock
-                || b instanceof BambooStalkBlock || b instanceof CocoaBlock || b instanceof NetherWartBlock) {
-            islandSkill(p, Skills.Skill.FARMING, 8);
-            PlayerStats.add(p, "harvest", 1);
-            BattlePass.event(p, "harvest", 1);
-        } else if (id.endsWith("_ore")) {
-            islandSkill(p, Skills.Skill.MINING, id.contains("diamond") || id.contains("emerald") ? 60 : 15);
-            PlayerStats.add(p, "island_ore", 1);
-            BattlePass.event(p, "island_ore", 1);
-        } else if (b == Blocks.STONE || b == Blocks.COBBLESTONE || b == Blocks.DEEPSLATE || b == Blocks.ANDESITE || b == Blocks.TUFF) {
-            islandSkill(p, Skills.Skill.MINING, 3);
         }
+    }
+
+    private static void farmed(ServerPlayer p, int xp) {
+        islandSkill(p, Skills.Skill.FARMING, xp);
+        PlayerStats.add(p, "harvest", 1);
+        BattlePass.event(p, "harvest", 1);
     }
 
     /** Shepherd skill XP: shearing, breeding and milking animals on your island. */

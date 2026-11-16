@@ -22,13 +22,13 @@ public final class TownDesign {
     // ---- The Mine's tables (edit here): one entry per gallery, coal .. emerald ----
     public static final String[] GALLERY_NAMES = {"Coal Seam", "Iron Drift", "Copper Vein", "Gold Reef", "Redstone Run", "Lapis Hollow", "Diamond Deep", "Emerald Heart"};
     /** Mining level needed for each gallery. */
-    public static final int[] MINE_LEVELS = {1, 5, 10, 15, 20, 25, 35, 50};
+    public static final int[] MINE_LEVELS = {1, 5, 10, 15, 20, 25, 30, 50}; // 5.23: diamonds at 30 (was 35)
     /** How many ore blocks each gallery has. */
     public static final int[] MINE_COUNTS = {12, 8, 8, 6, 6, 4, 2, 2};
     /** Seconds for a mined ore to grow back. */
     public static final int[] MINE_REGROW_SECONDS = {60, 120, 120, 240, 180, 240, 900, 1200};
-    /** Mining XP per ore. */
-    public static final int[] MINE_XP = {36, 60, 55, 100, 90, 100, 225, 350};
+    /** Mining XP per ore. 5.23: cut to ~35% (was 36, 60, 55, 100, 90, 100, 225, 350): coal alone ~8,000 XP an hour. */
+    public static final int[] MINE_XP = {13, 21, 19, 35, 32, 35, 80, 120};
     public static final String[] MINE_ORES = {"coal_ore", "iron_ore", "copper_ore", "gold_ore", "redstone_ore", "lapis_ore", "diamond_ore", "emerald_ore"};
     static final String[] MINE_MARKERS = {"coal_block", "iron_block", "cut_copper", "gold_block", "redstone_block", "lapis_block", "diamond_block", "emerald_block"};
     public static final int STREET_Z = 100, STREET_X1 = 126, STREET_X2 = 316;

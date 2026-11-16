@@ -258,6 +258,11 @@ public final class AncientCity {
         return server == null ? null : server.getLevel(DIM);
     }
 
+    /** 5.23: the trips running (for CityChalk). */
+    static List<Run> runs() {
+        return RUNS;
+    }
+
     static Run runOf(UUID id) {
         for (Run r : RUNS) if (r.inside.contains(id)) return r;
         return null;
@@ -278,6 +283,7 @@ public final class AncientCity {
 
     public static void init() {
         CityMarket.init();
+        CityChalk.init(); // 5.23: Wren's Chalk Map (its right-click runs before the city's item rules)
         ServerLifecycleEvents.SERVER_STARTING.register(s -> Safe.run("city wipe", () -> {
             try {
                 wipe(s);
@@ -769,6 +775,7 @@ public final class AncientCity {
         }
         run.cap = BASE_CAP * (1 + CREW_ROOM * (run.inside.size() - 1));
         for (ServerPlayer p : inside(run)) help(p);
+        Safe.run("city chalk start", () -> CityChalk.start(l, run));
         for (int i = 0; i < ROAMING[run.diff]; i++) {
             BlockPos s = CityWardens.farSpot(run, 40);
             if (s != null) CityWardens.spawn(l, run, s, true, null);
@@ -782,6 +789,8 @@ public final class AncientCity {
                 + "Landing, chests, blocks, urns, sensors and shriekers add more. §c§l100% = everyone loses everything.");
         Lobby.msg(p, "§7Houses with §flit candles §7inside are real - unlit ones are decoys. No sprinting, no night vision, no torches. "
                 + "§fBone Rattles §7lure the §lWarden§7 (it §ccan't be killed§7; it gives up after 15 s out of sight).");
+        Lobby.msg(p, "§6Wren's Chalk Map §7(slot 9) draws where you've walked - right-click for the whole city, stand still to see yourself, "
+                + "meet a crewmate to compare chalk. The crew's map hangs in the lift.");
         Lobby.msg(p, "§7The §3Deep Vault §7under the cracked plug south of the frame: lure a Warden's sonic boom through it, or mine it (loud). "
                 + "§c§lDying loses everything you carry §7(a §bRecovery Charm §7saves it).");
     }
@@ -975,6 +984,8 @@ public final class AncientCity {
             if (run.over || l == null) continue;
             CityWardens.fastTick(l, run);
             rattles(l, run);
+            CityWardens.darknessTick(l, run, ticks); // 5.23: Warden darkness comes as short flashes
+            Safe.run("city chalk", () -> CityChalk.tick(l, run, ticks));
             if (ticks % 5 == 0) movement(run);
             if (run.over) continue;
             if (ticks % 10 == 0) {
@@ -1558,6 +1569,7 @@ public final class AncientCity {
         removeRelicIfCarried(p, run);
         restoreCompass(p);
         if (run != null) run.inside.remove(id);
+        CityWardens.clearFlicker(id);
         p.removeEffect(MobEffects.DARKNESS);
         p.removeEffect(MobEffects.SLOWNESS);
         p.getFoodData().setFoodLevel(20);
@@ -1831,6 +1843,7 @@ public final class AncientCity {
         if (run == null || run.over) return;
         run.over = true;
         RUNS.remove(run);
+        CityChalk.end(run);
         ServerLevel l = level();
         for (UUID id : new ArrayList<>(run.inside)) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);

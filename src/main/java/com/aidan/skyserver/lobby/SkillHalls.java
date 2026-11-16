@@ -335,6 +335,27 @@ public final class SkillHalls {
     static final int[][] ORDER_XP = {{400, 1200, 2500}, {300, 900, 2000}};   // farmer, shepherd
     static final long[] ORDER_PAY = {300, 700, 1500};
     private static final Map<String, String> CLAIMED = new HashMap<>(); // "who:n:uuid" -> day
+    private static boolean claimsLoaded = false;
+
+    /** 5.23: daily claims (orders, Gauntlet, Coach Pip) are saved, so a restart can't hand them out twice. */
+    private static String claimedDay(String key) {
+        if (!claimsLoaded) {
+            claimsLoaded = true;
+            String today = LocalDate.now().toString();
+            for (Map.Entry<String, JsonElement> e : Stacks.readFile("npc-claims.json").entrySet())
+                if (today.equals(e.getValue().getAsString())) CLAIMED.put(e.getKey(), today);
+        }
+        return CLAIMED.get(key);
+    }
+
+    private static void claim(String key, String day) {
+        claimedDay(key);
+        CLAIMED.put(key, day);
+        JsonObject o = new JsonObject();
+        String today = LocalDate.now().toString();
+        CLAIMED.forEach((k, v) -> { if (today.equals(v)) o.addProperty(k, v); });
+        Stacks.writeFile("npc-claims.json", o);
+    }
 
     private static void orders(ServerPlayer p, Npc n, String who, Skills.Skill s, String how) {
         int idx = who.equals("farmer") ? 0 : 1;
@@ -342,7 +363,7 @@ public final class SkillHalls {
         say(p, n.name(), who.equals("farmer") ? "Got three orders for today. Grow 'em on your island and come back!" : "My flock needs tending! Three jobs for today:");
         String today = LocalDate.now().toString();
         for (int i = 0; i < 3; i++) {
-            boolean done = today.equals(CLAIMED.get(who + ":" + i + ":" + p.getUUID()));
+            boolean done = today.equals(claimedDay(who + ":" + i + ":" + p.getUUID()));
             long need = ORDER_XP[idx][i];
             MutableComponent line = Component.literal(" §7" + (i + 1) + ". Earn §f" + need + " " + s.title + " XP §7today §8(" + Math.min(have, need) + "/" + need + ") §6" + Economy.format(ORDER_PAY[i]) + " ");
             if (done) line.append(Component.literal("§a✔ done"));
@@ -356,12 +377,12 @@ public final class SkillHalls {
         if (i < 0 || i > 2) return;
         int idx = who.equals("farmer") ? 0 : 1;
         String key = who + ":" + i + ":" + p.getUUID(), today = LocalDate.now().toString();
-        if (today.equals(CLAIMED.get(key))) return;
+        if (today.equals(claimedDay(key))) return;
         if (Skills.xpToday(p.getUUID(), s) < ORDER_XP[idx][i]) {
             Lobby.msg(p, "§cNot done yet.");
             return;
         }
-        CLAIMED.put(key, today);
+        claim(key, today);
         Economy.add(p.level().getServer(), p.getUUID(), p.getName().getString(), ORDER_PAY[i]);
         Lobby.msg(p, "§aOrder done! §6+" + Economy.format(ORDER_PAY[i]));
         Quests.progress(p, "npc_order", 1);
@@ -518,16 +539,16 @@ public final class SkillHalls {
         String today = LocalDate.now().toString();
         String key = "gauntlet:" + (wave + 1) + ":" + human.getUUID();
         MinecraftServer server = human.level().getServer();
-        if (!today.equals(CLAIMED.get(key))) {
-            CLAIMED.put(key, today);
+        if (!today.equals(claimedDay(key))) {
+            claim(key, today);
             Economy.add(server, human.getUUID(), human.getName().getString(), 100L * (wave + 1));
             Lobby.msg(human, "§aWave " + (wave + 1) + " cleared! §6+" + Economy.format(100L * (wave + 1)));
         }
         if (wave + 1 >= WAVES.length) {
             GAUNTLET.remove(human.getUUID());
             Announce.title(human, "§6§lGAUNTLET CLEARED!", "§7All " + WAVES.length + " waves", 5, 60, 10);
-            if (!today.equals(CLAIMED.get("gauntlet:all:" + human.getUUID()))) {
-                CLAIMED.put("gauntlet:all:" + human.getUUID(), today);
+            if (!today.equals(claimedDay("gauntlet:all:" + human.getUUID()))) {
+                claim("gauntlet:all:" + human.getUUID(), today);
                 Keys.reward(server, human.getUUID(), 0, 1, "(cleared the Gauntlet)");
             }
             PlayerStats.add(human, "gauntlet_clear", 1);
@@ -753,7 +774,7 @@ public final class SkillHalls {
 
     private static void coach(ServerPlayer p, Npc n) {
         Trial t = trial(p);
-        boolean done = LocalDate.now().toString().equals(CLAIMED.get("trial:" + p.getUUID()));
+        boolean done = LocalDate.now().toString().equals(claimedDay("trial:" + p.getUUID()));
         say(p, n.name(), done ? "You already beat today's trial - nice running! New one tomorrow." :
                 "Today's time trial: finish §e" + t.course().name() + "§f in under §e" + Parkour.time(t.targetTicks()) + "§f!");
         if (!done) {
@@ -765,14 +786,14 @@ public final class SkillHalls {
     /** Called by Parkour when someone finishes a course. */
     static void courseFinished(ServerPlayer p, LobbyDesign.Course course, int ticks) {
         String key = "trial:" + p.getUUID(), today = LocalDate.now().toString();
-        if (today.equals(CLAIMED.get(key))) return;
+        if (today.equals(claimedDay(key))) return;
         Trial t = trial(p);
         if (!t.course().id().equals(course.id())) return;
         if (ticks > t.targetTicks()) {
             Lobby.msg(p, "§dCoach Pip's trial: §7" + Parkour.time(ticks) + " - you needed under " + Parkour.time(t.targetTicks()) + ". Try again!");
             return;
         }
-        CLAIMED.put(key, today);
+        claim(key, today);
         Economy.add(p.level().getServer(), p.getUUID(), p.getName().getString(), TRIAL_PAY[course.tier()]);
         Skills.add(p, Skills.Skill.PARKOUR, TRIAL_XP[course.tier()]);
         Lobby.msg(p, "§d§lTIME TRIAL BEATEN! §6+" + Economy.format(TRIAL_PAY[course.tier()]) + " §d+" + TRIAL_XP[course.tier()] + " Parkour XP");

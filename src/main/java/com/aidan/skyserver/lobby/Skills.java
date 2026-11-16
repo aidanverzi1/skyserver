@@ -22,11 +22,13 @@ import java.util.*;
  * Shepherd's Fields, Fighters' Guild, Builders' Gallery) and better fishing pay.
  *
  * Where the XP comes from:
- *  Mining   - the lobby mine, and mining stone/ores on your island
- *  Farming  - harvesting fully grown crops on your island
+ *  Mining   - the lobby mine, and blocks that grew on an island generator (5.23: only those - placed
+ *             blocks give nothing, so no Silk Touch / place-and-break loops)
+ *  Farming  - harvesting grown crops on your island (5.23: only the grown part; placed melons,
+ *             pumpkins, cane, cactus and bamboo give nothing)
  *  Shepherd - shearing, breeding and milking animals on your island
  *  Fishing  - every fish caught (lobby pond or island)
- *  Combat   - kills in Skywars / Gold Wars, duel and Spleef wins
+ *  Combat   - kills and wins in Bedwars / Skywars / Gold Wars, duels, Spleef and the Nether Expedition
  *  Building - placing blocks on your island (up to 5,000 XP a day), Captain Wren's quests
  *  Parkour  - obstacle courses, the maze and the elytra rings
  *
@@ -34,7 +36,11 @@ import java.util.*;
  * multipliers below even out the sources). Level 50 takes ~130,000 XP (about 13 hours) and
  * Legends need another ~325,000 XP (about 32 hours) to reach 100. Old saves are converted so
  * everyone keeps their level and how far they were into it.
- * Saved in config/skyserver/skills.json.
+ * 5.23: Fishing is tuned to ~13,000 an hour (it's the calmest skill) but stops at FISH_WINDOW_CAP
+ * XP per rolling FISH_WINDOW_MINUTES (in case someone beats the AFK checks). Every skill also stops at
+ * HOUR_CAP XP per rolling hour, counted after every bonus - a safety net against future bugs.
+ * Saved in config/skyserver/skills.json (5.23: the daily counters and the rolling hours too, in "_daily",
+ * so a restart doesn't reset them).
  */
 public final class Skills {
     public enum Skill {
@@ -75,6 +81,12 @@ public final class Skills {
         return t;
     }
     public static final int BUILDING_DAILY_CAP = 5_000;
+    /** 5.23: most XP of one skill per rolling hour (after every bonus). */
+    public static final int HOUR_CAP = 17_500;
+    /** 5.23: most Fishing XP per rolling FISH_WINDOW_MINUTES. */
+    public static final int FISH_WINDOW_CAP = 30_000, FISH_WINDOW_MINUTES = 8 * 60;
+    /** 5.23: Fishing XP per fish before the skill rate (x0.9 = 72) - about 13,000 an hour. */
+    public static final int FISH_XP = 80;
 
     /** What a level unlocks, for the level-up message and /skills. */
     private static final Map<String, String> UNLOCKS = new HashMap<>();
@@ -83,9 +95,8 @@ public final class Skills {
         String[][] m = Mine.UNLOCK_TEXT;
         for (String[] u : m) UNLOCKS.put("MINING:" + u[0], u[1]);
         for (TownDesign.Area a : TownDesign.AREAS) if (a.skill() != null) UNLOCKS.merge(a.skill() + ":" + a.level(), "the " + a.name() + " in the lobby", (x, y) -> x + ", " + y);
-        UNLOCKS.put("FISHING:10", "+20% pay at the lobby pond");
-        UNLOCKS.put("FISHING:25", "+50% pay at the lobby pond");
-        UNLOCKS.put("FISHING:40", "double pay at the lobby pond");
+        for (int l = Activities.FISH_SKILL_BONUS_LEVELS, b = 1; b <= Activities.FISH_SKILL_BONUS_MAX; l += Activities.FISH_SKILL_BONUS_LEVELS, b++)
+            UNLOCKS.merge("FISHING:" + l, "+$" + b + " per fish at the lobby pond", (x, y) -> x + ", " + y);
     }
 
     private static final Map<UUID, long[]> XP = new HashMap<>();          // per skill
@@ -96,6 +107,9 @@ public final class Skills {
     /** XP earned today in each skill (for the Town NPCs' daily tasks). */
     private static final Map<UUID, long[]> XP_TODAY = new HashMap<>();
     private static String xpDay = "";
+    /** 5.23: XP gained per minute, per player per skill: {epoch minute, xp}, oldest first (for the rolling caps). */
+    private static final Map<UUID, List<ArrayDeque<long[]>>> RECENT = new HashMap<>();
+    private static final Map<String, Long> CAP_MSG = new HashMap<>(); // "uuid:skill" -> last message (ms)
 
     public static long xpToday(UUID id, Skill s) {
         if (!LocalDate.now().toString().equals(xpDay)) return 0;
@@ -125,7 +139,7 @@ public final class Skills {
                 if (p instanceof com.aidan.skyserver.bots.BotPlayer) continue;
                 int caught = p.getStats().getValue(Stats.CUSTOM.get(Stats.FISH_CAUGHT));
                 Integer before = FISH_SEEN.put(p.getUUID(), caught);
-                if (before != null && caught > before) add(p, Skill.FISHING, 60 * (caught - before));
+                if (before != null && caught > before) add(p, Skill.FISHING, FISH_XP * (caught - before));
             }
             if (dirty && s.getTickCount() % 400 == 0) save();
         }
@@ -183,13 +197,31 @@ public final class Skills {
 
     /** Adds skill XP (bots get none) and hands out level-up rewards. */
     public static void add(ServerPlayer p, Skill s, int amount) {
+        add(p, s, (double) amount);
+    }
+
+    /** 5.23: fractional amounts are kept (island generators give 0.7 XP for cobble, for example). */
+    public static void add(ServerPlayer p, Skill s, double amount) {
         if (p == null || amount <= 0 || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
+        grant(p, s, amount * Events.xpMult() * s.rate);
+    }
+
+    /**
+     * 5.23: XP that's already final (no weekend bonus or skill rate on top) - for bonuses worked out from
+     * XP that was already given, like Harvest Moon's +10%. The caps still apply.
+     */
+    public static void addExact(ServerPlayer p, Skill s, double amount) {
+        if (p == null || amount <= 0 || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
+        grant(p, s, amount);
+    }
+
+    private static void grant(ServerPlayer p, Skill s, double scaledIn) {
         load();
-        amount = Events.xp(amount);
-        // Even out the skills: small amounts keep their leftover fraction for next time.
-        double[] carry = CARRY.computeIfAbsent(p.getUUID(), k -> new double[Skill.values().length]);
-        double scaled = amount * s.rate + carry[s.ordinal()];
-        amount = (int) Math.floor(scaled);
+        UUID id = p.getUUID();
+        // Small amounts keep their leftover fraction for next time.
+        double[] carry = CARRY.computeIfAbsent(id, k -> new double[Skill.values().length]);
+        double scaled = scaledIn + carry[s.ordinal()];
+        int amount = (int) Math.floor(scaled);
         carry[s.ordinal()] = scaled - amount;
         if (amount <= 0) return;
         if (s == Skill.BUILDING) {
@@ -198,19 +230,48 @@ public final class Skills {
                 today = d;
                 TODAY.clear();
             }
-            int[] t = TODAY.computeIfAbsent(p.getUUID(), k -> new int[1]);
+            int[] t = TODAY.computeIfAbsent(id, k -> new int[1]);
             amount = Math.min(amount, BUILDING_DAILY_CAP - t[0]);
             if (amount <= 0) return;
             t[0] += amount;
         }
+        long minute = System.currentTimeMillis() / 60_000L;
+        ArrayDeque<long[]> recent = recent(id, s, minute);
+        // 5.23: Fishing - at most FISH_WINDOW_CAP per rolling 8 hours.
+        if (s == Skill.FISHING) {
+            long had = sum(recent, minute, FISH_WINDOW_MINUTES);
+            int room = (int) Math.max(0, FISH_WINDOW_CAP - had);
+            if (amount > room) {
+                amount = room;
+                capMessage(p, s, "§b🎣 The fish are wary of you. §7No more Fishing XP for about §f"
+                        + waitText(recent, minute, FISH_WINDOW_MINUTES, FISH_WINDOW_CAP) + " §8(" + String.format("%,d", FISH_WINDOW_CAP)
+                        + " Fishing XP per " + FISH_WINDOW_MINUTES / 60 + " hours)");
+            } else if (had + amount >= FISH_WINDOW_CAP * 3L / 4) {
+                Announce.actionBar(p, "§bFishing XP: §f" + String.format("%,d", had + amount) + " / " + String.format("%,d", FISH_WINDOW_CAP)
+                        + " §7(last " + FISH_WINDOW_MINUTES / 60 + " hours)");
+            }
+            if (amount <= 0) return;
+        }
+        // 5.23: every skill - at most HOUR_CAP per rolling hour.
+        long hour = sum(recent, minute, 60);
+        int room = (int) Math.max(0, HOUR_CAP - hour);
+        if (amount > room) {
+            amount = room;
+            capMessage(p, s, "§7You've reached the hourly limit for " + s.color + s.title + " XP §7(" + String.format("%,d", HOUR_CAP)
+                    + "). §8More in about " + waitText(recent, minute, 60, HOUR_CAP));
+            if (amount <= 0) return;
+        }
+        long[] last = recent.peekLast();
+        if (last != null && last[0] == minute) last[1] += amount;
+        else recent.addLast(new long[]{minute, amount});
         String d0 = LocalDate.now().toString();
         if (!d0.equals(xpDay)) {
             xpDay = d0;
             XP_TODAY.clear();
         }
-        XP_TODAY.computeIfAbsent(p.getUUID(), k -> new long[Skill.values().length])[s.ordinal()] += amount;
-        long[] x = xp(p.getUUID());
-        int cap = cap(p.getUUID());
+        XP_TODAY.computeIfAbsent(id, k -> new long[Skill.values().length])[s.ordinal()] += amount;
+        long[] x = xp(id);
+        int cap = cap(id);
         int before = levelOf(x[s.ordinal()], cap)[0];
         x[s.ordinal()] += amount;
         // Until you're a Legend, XP stops at level 50 (it doesn't pile up for later).
@@ -219,6 +280,48 @@ public final class Skills {
         dirty = true;
         for (int lvl = before + 1; lvl <= after; lvl++) levelUp(p, s, lvl);
         if (after > before) save();
+    }
+
+    /** This player's per-minute XP list for a skill, with entries older than 8 hours dropped. */
+    private static ArrayDeque<long[]> recent(UUID id, Skill s, long minute) {
+        List<ArrayDeque<long[]>> all = RECENT.computeIfAbsent(id, k -> {
+            List<ArrayDeque<long[]>> l = new ArrayList<>();
+            for (int i = 0; i < Skill.values().length; i++) l.add(new ArrayDeque<>());
+            return l;
+        });
+        ArrayDeque<long[]> q = all.get(s.ordinal());
+        while (!q.isEmpty() && q.peekFirst()[0] <= minute - FISH_WINDOW_MINUTES) q.pollFirst();
+        return q;
+    }
+
+    private static long sum(ArrayDeque<long[]> q, long minute, int window) {
+        long t = 0;
+        for (long[] e : q) if (e[0] > minute - window) t += e[1];
+        return t;
+    }
+
+    /** How long until there's room under the cap again, as "1h 20m" / "12 min". */
+    private static String waitText(ArrayDeque<long[]> q, long minute, int window, long cap) {
+        long total = sum(q, minute, window), wait = window;
+        for (long[] e : q) {
+            if (e[0] <= minute - window) continue;
+            total -= e[1];
+            if (total < cap) {
+                wait = e[0] + window - minute;
+                break;
+            }
+        }
+        wait = Math.max(1, wait);
+        return wait >= 60 ? (wait / 60) + "h " + (wait % 60) + "m" : wait + " min";
+    }
+
+    private static void capMessage(ServerPlayer p, Skill s, String text) {
+        String key = p.getUUID() + ":" + s.name();
+        long now = System.currentTimeMillis();
+        Long last = CAP_MSG.get(key);
+        if (last != null && now - last < 120_000L) return;
+        CAP_MSG.put(key, now);
+        Lobby.msg(p, text);
     }
 
     /** Level-up money: $40 per level, plus a bit extra past level 10 since levels take longer now. */
@@ -246,6 +349,8 @@ public final class Skills {
             Lobby.msg(p, " " + s.color + s.icon + " " + s.title + " §f" + l[0] + (l[2] > 0 ? " §7(" + l[1] + "/" + l[2] + ")" : " §6(max)")
                     + (next != null ? " §8next: " + next : ""));
         }
+        Lobby.msg(p, "§8Limits: " + String.format("%,d", HOUR_CAP) + " XP per skill per hour; Fishing " + String.format("%,d", FISH_WINDOW_CAP)
+                + " per " + FISH_WINDOW_MINUTES / 60 + " hours." + (Events.doubleXp() ? " §6" + Events.xpEventName() + " is on!" : ""));
     }
 
     public static List<String> lines(UUID id) {
@@ -265,18 +370,23 @@ public final class Skills {
         return null;
     }
 
-    /** Lobby pond pay multiplier from the Fishing skill. */
-    public static double fishingPay(UUID id) {
-        int l = level(id, Skill.FISHING);
-        return l >= 40 ? 2.0 : l >= 25 ? 1.5 : l >= 10 ? 1.2 : 1.0;
-    }
-
     /** /ss resetskills: everything back to level 1. */
     public static void adminReset(UUID id) {
         load();
         XP.remove(id);
         CARRY.remove(id);
         save();
+    }
+
+    /** 5.23 /ss setskill: puts one skill at the start of a level (no level-up rewards). Returns the level set. */
+    public static int adminSetLevel(UUID id, Skill s, int level) {
+        load();
+        int lvl = Math.max(1, Math.min(level, cap(id)));
+        xp(id)[s.ordinal()] = totalFor(lvl);
+        double[] c = CARRY.get(id);
+        if (c != null) c[s.ordinal()] = 0;
+        save();
+        return lvl;
     }
 
     // ---- Saving ----
@@ -300,6 +410,7 @@ public final class Skills {
             } catch (IllegalArgumentException ignored) {
             }
         }
+        if (root.has("_daily") && root.get("_daily").isJsonObject()) loadDaily(root.getAsJsonObject("_daily"));
         if (convert) {
             // Keep a copy of the old file, then save in the new format right away.
             Stacks.writeFile("skills-before-5.10.json", root);
@@ -316,6 +427,75 @@ public final class Skills {
             for (long x : v) a.add(x);
             root.add(k.toString(), a);
         });
+        root.add("_daily", saveDaily());
         Stacks.writeFile("skills.json", root);
+    }
+
+    /** 5.23: the Building cap, XP-today and the rolling hours survive a restart. */
+    private static JsonObject saveDaily() {
+        JsonObject o = new JsonObject();
+        o.addProperty("buildDay", today);
+        JsonObject b = new JsonObject();
+        TODAY.forEach((k, v) -> b.addProperty(k.toString(), v[0]));
+        o.add("building", b);
+        o.addProperty("xpDay", xpDay);
+        JsonObject t = new JsonObject();
+        XP_TODAY.forEach((k, v) -> {
+            JsonArray a = new JsonArray();
+            for (long x : v) a.add(x);
+            t.add(k.toString(), a);
+        });
+        o.add("xpToday", t);
+        long minute = System.currentTimeMillis() / 60_000L;
+        JsonObject r = new JsonObject();
+        RECENT.forEach((k, list) -> {
+            JsonArray a = new JsonArray();
+            for (int i = 0; i < list.size(); i++)
+                for (long[] e : list.get(i)) {
+                    if (e[0] <= minute - FISH_WINDOW_MINUTES) continue;
+                    JsonArray en = new JsonArray();
+                    en.add(i);
+                    en.add(e[0]);
+                    en.add(e[1]);
+                    a.add(en);
+                }
+            if (!a.isEmpty()) r.add(k.toString(), a);
+        });
+        o.add("recent", r);
+        return o;
+    }
+
+    private static void loadDaily(JsonObject o) {
+        try {
+            String d = LocalDate.now().toString();
+            if (o.has("buildDay") && d.equals(o.get("buildDay").getAsString()) && o.has("building")) {
+                today = d;
+                for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("building").entrySet())
+                    TODAY.put(UUID.fromString(e.getKey()), new int[]{e.getValue().getAsInt()});
+            }
+            if (o.has("xpDay") && d.equals(o.get("xpDay").getAsString()) && o.has("xpToday")) {
+                xpDay = d;
+                for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("xpToday").entrySet()) {
+                    JsonArray a = e.getValue().getAsJsonArray();
+                    long[] v = new long[Skill.values().length];
+                    for (int i = 0; i < v.length && i < a.size(); i++) v[i] = a.get(i).getAsLong();
+                    XP_TODAY.put(UUID.fromString(e.getKey()), v);
+                }
+            }
+            if (o.has("recent")) {
+                long minute = System.currentTimeMillis() / 60_000L;
+                for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("recent").entrySet()) {
+                    UUID id = UUID.fromString(e.getKey());
+                    for (JsonElement el : e.getValue().getAsJsonArray()) {
+                        JsonArray en = el.getAsJsonArray();
+                        int i = en.get(0).getAsInt();
+                        if (i < 0 || i >= Skill.values().length) continue;
+                        recent(id, Skill.values()[i], minute).addLast(new long[]{en.get(1).getAsLong(), en.get(2).getAsLong()});
+                    }
+                }
+            }
+        } catch (RuntimeException ex) {
+            com.aidan.skyserver.Skyserver.LOGGER.warn("skills.json: couldn't read the daily counters ({}), starting them fresh", ex.toString());
+        }
     }
 }

@@ -138,6 +138,11 @@ public final class Levels {
      * 12 skill XP, at most 450 an hour and 1,500 a day. Called by Islands.
      */
     public static void addIslandSkillXp(ServerPlayer p, int skillXp) {
+        addIslandSkillXp(p, (double) skillXp);
+    }
+
+    /** 5.23: fractional skill XP (island generators give 0.7 for cobble). */
+    public static void addIslandSkillXp(ServerPlayer p, double skillXp) {
         if (skillXp <= 0 || p == null || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
         PlayerProfile prof = PlayerCache.get(p);
         prof.islandFrac += skillXp / (double) Progression.ISLAND_SKILL_PER_XP;

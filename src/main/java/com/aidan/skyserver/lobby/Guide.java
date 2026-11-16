@@ -80,7 +80,7 @@ public final class Guide {
                     "When the leader joins", "a game, the party", "comes too (same team", "in Gold Wars). Visit", "each other's islands", "without asking."},
             {"§2§lIsland extras§r", "", "§l/is setwarp <name>§r", "§l/is warp <name>§r", "§l/is warps§r (up to 5)", "",
                     "§l/is contribute <amt>§r", "shared upgrade fund", "§l/is fund§r", "", "§l/ic <msg>§r island chat"},
-            {"§6§lEvents§r", "", "§lDouble XP§r every", "weekend!", "", "§lSpleef Tournament§r", "Saturdays 7pm: most", "wins gets a Rare Key.", "",
+            {"§6§lEvents§r", "", "§l+25% XP§r every", "weekend!", "", "§lSpleef Tournament§r", "Saturdays 7pm: most", "wins gets a Rare Key.", "",
                     "§l/events§r details", "§l/sidebar§r hide/show", "the side panel"},
             {"§a§lTown people§r", "", "Right-click them:", "§lFarmer Hal§r orders", "§lShepherd Mae§r eggs", "§lSgt. Vex§r Gauntlet", "§lCurator Ivy§r contest",
                     "§lSmith Brann§r pickaxe", "§lOld Gil§r fish contest", "§lCoach Pip§r time trial", "", "§l/build§r contest", "Crates: right-click", "the barrel daily."},

@@ -73,7 +73,7 @@ public final class Voyage {
                 "No choosing this week - the wind picks your class every time you respawn!"),
         TIME_TRIAL(Mode.ELYTRA, "Time Trial", "One featured elytra course, weekly best times.",
                 "Fastest flyer on the featured course gets a prize from my own chest!"),
-        HARVEST_MOON(Mode.ISLAND, "Harvest Moon", "+50% Farming and Shepherd skill XP.",
+        HARVEST_MOON(Mode.ISLAND, "Harvest Moon", "+10% Farming and Shepherd XP, crops grow 25% faster.",
                 "The harvest moon is up - crops and flocks grow fast on every island."),
         WRENS_BOUNTY(Mode.EXPEDITION, "Wren's Bounty", "Expedition tickets 20% off, an extra roll in every room chest. Board points per boss: Easy 1, Normal 2, Hard 3, Nightmare 4.",
                 "Twenty percent off every trip, and extra loot in the rooms. My treat!");
@@ -688,6 +688,7 @@ public final class Voyage {
             wrenOnIslands(s, w);
         }
         if (w != null && w.twist == Twist.HARVEST_MOON && ticks % 1200 == 300) islandMinute(s, w);
+        if (w != null && w.twist == Twist.HARVEST_MOON && ticks % 20 == 13) growCrops(s);
         if (w != null && w.perk == Perk.PASS_XP && ticks % 100 == 51) passPerk(s);
         if (ticks % 100 == 3) hologram();
         if (dirty && ticks % 600 == 0) save();
@@ -702,7 +703,12 @@ public final class Voyage {
         }
     }
 
-    /** Harvest Moon: +50% Farming and Shepherd XP, and that XP is the board score. */
+    /** 5.23: Harvest Moon bonus (was +50%). */
+    public static final double HARVEST_BONUS = 0.10;
+    /** 5.23: Harvest Moon crops grow this much faster (extra random ticks on crops near island players). */
+    public static final double HARVEST_GROWTH = 0.25;
+
+    /** Harvest Moon: +10% Farming and Shepherd XP, and that XP is the board score. */
     private static void harvest(MinecraftServer s, Week w) {
         Skills.Skill[] skills = {Skills.Skill.FARMING, Skills.Skill.SHEPHERD};
         for (ServerPlayer p : s.getPlayerList().getPlayers()) {
@@ -719,13 +725,50 @@ public final class Voyage {
                     Prog g = prog(w, p);
                     g.score += delta;
                     if (g.firstAt == 0) g.firstAt = System.currentTimeMillis();
-                    int raw = (int) Math.round(delta * 0.5 / Math.max(0.01, skills[i].rate));
-                    if (raw > 0) Skills.add(p, skills[i], raw);
+                    // 5.23: the bonus is worked out from XP already given, so no weekend bonus on top (was counted twice).
+                    Skills.addExact(p, skills[i], delta * HARVEST_BONUS);
                     dirty = true;
                 }
                 seen[i] = Skills.xpToday(p.getUUID(), skills[i]);
             }
         }
+    }
+
+    /**
+     * 5.23 Harvest Moon: crops grow HARVEST_GROWTH faster. Vanilla gives every 16x16x16 section 3 random ticks
+     * a tick; once a second this gives the crops in a 9x9-chunk, 48-block-tall box round each island player
+     * 25% of that again (only crop blocks get ticked).
+     */
+    private static void growCrops(MinecraftServer s) {
+        ServerLevel il = Islands.level();
+        if (il == null) return;
+        int perChunk = (int) Math.round(3 * 3 * HARVEST_GROWTH * 20); // 3 sections tall, per second
+        Set<Long> done = new HashSet<>();
+        net.minecraft.core.BlockPos.MutableBlockPos pos = new net.minecraft.core.BlockPos.MutableBlockPos();
+        var rng = il.getRandom();
+        for (ServerPlayer p : s.getPlayerList().getPlayers()) {
+            if (p instanceof com.aidan.skyserver.bots.BotPlayer || p.level() != il) continue;
+            int pcx = p.blockPosition().getX() >> 4, pcz = p.blockPosition().getZ() >> 4, py = p.blockPosition().getY();
+            for (int cx = pcx - 4; cx <= pcx + 4; cx++)
+                for (int cz = pcz - 4; cz <= pcz + 4; cz++) {
+                    if (!done.add(((long) cx << 32) ^ (cz & 0xFFFFFFFFL))) continue;
+                    if (!il.isLoaded(pos.set(cx << 4, py, cz << 4))) continue;
+                    for (int i = 0; i < perChunk; i++) {
+                        pos.set((cx << 4) + rng.nextInt(16), py - 24 + rng.nextInt(48), (cz << 4) + rng.nextInt(16));
+                        net.minecraft.world.level.block.state.BlockState st = il.getBlockState(pos);
+                        if (isCrop(st) && st.isRandomlyTicking()) st.randomTick(il, pos, rng);
+                    }
+                }
+        }
+    }
+
+    private static boolean isCrop(net.minecraft.world.level.block.state.BlockState st) {
+        net.minecraft.world.level.block.Block b = st.getBlock();
+        return b instanceof net.minecraft.world.level.block.CropBlock || b instanceof net.minecraft.world.level.block.StemBlock
+                || b instanceof net.minecraft.world.level.block.SugarCaneBlock || b instanceof net.minecraft.world.level.block.CactusBlock
+                || b instanceof net.minecraft.world.level.block.BambooStalkBlock || b instanceof net.minecraft.world.level.block.BambooSaplingBlock
+                || b instanceof net.minecraft.world.level.block.CocoaBlock || b instanceof net.minecraft.world.level.block.NetherWartBlock
+                || b instanceof net.minecraft.world.level.block.SweetBerryBushBlock;
     }
 
     /** Harvest Moon: island time counts toward the stamp (one minute at a time). */

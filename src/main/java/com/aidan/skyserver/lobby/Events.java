@@ -11,7 +11,8 @@ import java.util.*;
 /**
  * Server events.
  *
- *  Double XP weekends: every Saturday and Sunday (server's clock), all server XP and skill XP is doubled.
+ *  Bonus XP weekends (5.23: +25%, was double): every Saturday and Sunday (server's clock), all server XP and skill XP
+ *  gets WEEKEND_BONUS more. The op command still starts a true double XP event (it wins over the weekend bonus).
  *  Admins can also start one any time with /ss event doublexp <hours>.
  *
  *  Spleef Tournament: every Saturday at 7pm (server's clock) for 1 hour. Spleef / TNT Run wins against
@@ -77,15 +78,41 @@ public final class Events {
 
     // ---- Double XP ----
 
-    public static boolean doubleXp() {
+    /** 5.23: weekend bonus XP (was double). */
+    public static final double WEEKEND_BONUS = 0.25;
+
+    /** True while an op-started double XP event runs. */
+    public static boolean manualDoubleXp() {
         load();
-        if (System.currentTimeMillis() < manualXpUntil) return true;
+        return System.currentTimeMillis() < manualXpUntil;
+    }
+
+    /** True on Saturdays and Sundays (if the weekend bonus is turned on). */
+    public static boolean weekendBonus() {
+        load();
         DayOfWeek d = LocalDateTime.now().getDayOfWeek();
         return weekendDoubleXp && (d == DayOfWeek.SATURDAY || d == DayOfWeek.SUNDAY);
     }
 
+    /** Any XP event on (double XP or the weekend bonus). */
+    public static boolean doubleXp() {
+        return manualDoubleXp() || weekendBonus();
+    }
+
+    /** The XP multiplier right now: 2.0 for an op double XP event, 1.25 on weekends, else 1.0. */
+    public static double xpMult() {
+        if (manualDoubleXp()) return 2.0;
+        return weekendBonus() ? 1.0 + WEEKEND_BONUS : 1.0;
+    }
+
     public static int xp(int amount) {
-        return doubleXp() ? amount * 2 : amount;
+        double m = xpMult();
+        return m == 1.0 ? amount : (int) Math.round(amount * m);
+    }
+
+    /** Short name of the XP event running, for messages. */
+    public static String xpEventName() {
+        return manualDoubleXp() ? "Double XP" : "+" + Math.round(WEEKEND_BONUS * 100) + "% XP weekend";
     }
 
     public static void startDoubleXp(MinecraftServer server, int hours) {
@@ -152,7 +179,7 @@ public final class Events {
             long left = (tournamentEnd - System.currentTimeMillis()) / 60_000 + 1;
             return "§b❄ Tournament §f" + left + "m";
         }
-        if (doubleXp()) return "§6✦ Double XP!";
+        if (doubleXp()) return "§6✦ " + xpEventName() + "!";
         return null;
     }
 
@@ -163,7 +190,7 @@ public final class Events {
     public static void showStatus(ServerPlayer p) {
         load();
         Lobby.msg(p, "§6§lEVENTS");
-        Lobby.msg(p, " §6Double XP: " + (doubleXp() ? "§aON now" : "§7off") + " §8(every weekend" + (weekendDoubleXp ? "" : " - turned off") + ")");
+        Lobby.msg(p, " §6Bonus XP: " + (doubleXp() ? "§a" + xpEventName() + " now" : "§7off") + " §8(+" + Math.round(WEEKEND_BONUS * 100) + "% every weekend" + (weekendDoubleXp ? "" : " - turned off") + ")");
         if (tournamentOn()) {
             Lobby.msg(p, " §bSpleef Tournament: §aRUNNING §7- your points: §f" + tournamentPoints(p.getUUID()));
             List<Map.Entry<UUID, Integer>> s = standings();
@@ -201,7 +228,8 @@ public final class Events {
         if (tournamentEnd != 0 && !tournamentOn()) endTournament(server);
         // Tell people when double XP starts (once per server run / weekend).
         boolean x = doubleXp();
-        if (x && !xpAnnounced) broadcast(server, "§6§l✦ DOUBLE XP IS ON! §7All server and skill XP is doubled.");
+        if (x && !xpAnnounced) broadcast(server, manualDoubleXp() ? "§6§l✦ DOUBLE XP IS ON! §7All server and skill XP is doubled."
+                : "§6§l✦ BONUS XP WEEKEND! §7All server and skill XP +" + Math.round(WEEKEND_BONUS * 100) + "% until Monday.");
         xpAnnounced = x;
     }
 

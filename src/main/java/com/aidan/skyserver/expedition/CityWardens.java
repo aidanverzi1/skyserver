@@ -8,6 +8,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
@@ -42,6 +44,9 @@ final class CityWardens {
     static final int[] ENGAGE_RANGE = {6, 7, 8, 10};
     static final double HEAR_RANGE = 16, RATTLE_RANGE = 20;
     static final int LOSE_TICKS = 15 * 20, INVESTIGATE_TICKS = 10 * 20, RESPAWN_TICKS = 20 * 20;
+    /** 5.23: after a Bone Rattle a Warden ignores nearby players and noise this long (unless someone touches it). */
+    static final int DISTRACT_TICKS = 4 * 20;
+    static final double TOUCH_RANGE = 1.5;
     static final double[] CHASE_SPEED = {0, 0, 0.15, 0.25};
     private static final Identifier SPEED_ID = Identifier.fromNamespaceAndPath(Skyserver.MOD_ID, "city_chase");
     private static final Random RNG = new Random();
@@ -51,7 +56,7 @@ final class CityWardens {
         final UUID id;
         final boolean roaming;
         UUID target;
-        long lostSince = -1, goalUntil = 0, investigateUntil = 0;
+        long lostSince = -1, goalUntil = 0, investigateUntil = 0, distractedUntil = 0;
         BlockPos goal;
 
         W(UUID id, boolean roaming) {
@@ -130,6 +135,57 @@ final class CityWardens {
         w.getBrain().setMemory(MemoryModuleType.WALK_TARGET, new WalkTarget(pos, speed, 1));
     }
 
+    // ---- 5.23: Warden darkness as horror flashes ----
+
+    /** How long the Warden's darkness lasts (vanilla: 13 s), as flashes FLASH_MIN..FLASH_MAX ticks long, GAP_MIN..GAP_MAX apart. */
+    static final int WARDEN_DARK_TICKS = 260, FLASH_MIN = 10, FLASH_MAX = 15, GAP_MIN = 16, GAP_MAX = 32;
+    /** Player -> {darkness window ends, next flash}. */
+    private static final Map<UUID, long[]> FLICKER = new HashMap<>();
+
+    /**
+     * Every tick. A Warden's vanilla darkness pulse (13 s, every 6 s to players within 20 blocks) is swapped for short
+     * flashes over the same 13 s, so you can still see while you run. Darkness from the noise milestones and from
+     * shriekers is left alone (only a fresh 13 s darkness right as a nearby Warden pulses is swapped).
+     */
+    static void darknessTick(ServerLevel l, AncientCity.Run run, long ticks) {
+        for (ServerPlayer p : AncientCity.inside(run)) {
+            UUID id = p.getUUID();
+            MobEffectInstance d = p.getEffect(MobEffects.DARKNESS);
+            if (d != null && d.getDuration() > 200 && wardenPulsed(l, run, p)) {
+                p.removeEffect(MobEffects.DARKNESS);
+                long[] f = FLICKER.get(id);
+                if (f == null || f[0] < ticks) FLICKER.put(id, new long[]{ticks + WARDEN_DARK_TICKS, ticks});
+                else f[0] = ticks + WARDEN_DARK_TICKS;
+            }
+            long[] f = FLICKER.get(id);
+            if (f == null) continue;
+            if (ticks >= f[0]) {
+                FLICKER.remove(id);
+                continue;
+            }
+            if (ticks >= f[1]) {
+                int len = FLASH_MIN + RNG.nextInt(FLASH_MAX - FLASH_MIN + 1);
+                p.addEffect(new MobEffectInstance(MobEffects.DARKNESS, len, 0, false, false));
+                f[1] = ticks + len + GAP_MIN + RNG.nextInt(GAP_MAX - GAP_MIN + 1);
+            }
+        }
+    }
+
+    /** A Warden of this trip within 21 blocks that pulsed darkness this tick (vanilla: when (tickCount + id) % 120 == 0). */
+    private static boolean wardenPulsed(ServerLevel l, AncientCity.Run run, ServerPlayer p) {
+        for (W s : run.wardens) {
+            Warden w = entity(l, s);
+            if (w == null || w.distanceToSqr(p) > 21 * 21) continue;
+            int m = Math.floorMod(w.tickCount + w.getId(), 120);
+            if (m == 0 || m == 1) return true;
+        }
+        return false;
+    }
+
+    static void clearFlicker(UUID id) {
+        FLICKER.remove(id);
+    }
+
     /** Every tick: calm Wardens stay calm (vanilla vibrations and sniffing don't count). */
     static void fastTick(ServerLevel l, AncientCity.Run run) {
         for (W s : run.wardens) {
@@ -195,13 +251,14 @@ final class CityWardens {
                 }
                 continue;
             }
-            // Calm: anyone too close?
+            // Calm: anyone too close? (5.23: a Warden distracted by a Bone Rattle only notices someone touching it.)
             ServerPlayer close = null;
             double best = Double.MAX_VALUE;
+            double range = s.distractedUntil > ticks ? TOUCH_RANGE : ENGAGE_RANGE[d];
             for (ServerPlayer p : AncientCity.inside(run)) {
                 if (AncientCity.isDowned(p.getUUID()) || run.layout.inLift(p.getX(), p.getY(), p.getZ())) continue;
                 double dist = w.distanceTo(p);
-                if (dist <= ENGAGE_RANGE[d] && dist < best) {
+                if (dist <= range && dist < best) {
                     best = dist;
                     close = p;
                 }
@@ -260,7 +317,7 @@ final class CityWardens {
     static void heard(ServerLevel l, AncientCity.Run run, ServerPlayer src, double raw, BlockPos at, long ticks) {
         if (raw < 5 || at == null) return;
         for (W s : run.wardens) {
-            if (s.target != null) continue;
+            if (s.target != null || s.distractedUntil > ticks) continue;
             Warden w = entity(l, s);
             if (w == null || w.blockPosition().distSqr(at) > HEAR_RANGE * HEAR_RANGE) continue;
             if (src != null && !run.layout.inLift(src.getX(), src.getY(), src.getZ())) engage(run, s, src);
@@ -274,20 +331,27 @@ final class CityWardens {
         s.goalUntil = s.investigateUntil;
     }
 
-    /** A Bone Rattle landed: nearby Wardens drop what they're doing and go there. */
+    /**
+     * A Bone Rattle landed: nearby Wardens drop what they're doing and go there. 5.23: even one charging you -
+     * for DISTRACT_TICKS it ignores players close by and noise (before, the "player close by" check grabbed
+     * it again half a second later), and it's sent straight off towards the rattle.
+     */
     static void rattle(ServerLevel l, AncientCity.Run run, BlockPos at, long ticks) {
         for (W s : run.wardens) {
             Warden w = entity(l, s);
             if (w == null || w.blockPosition().distSqr(at) > RATTLE_RANGE * RATTLE_RANGE) continue;
             if (s.target != null) disengage(l, run, s);
+            calm(w, run);
             investigate(s, at, ticks);
+            s.distractedUntil = ticks + DISTRACT_TICKS;
+            walkTo(w, at, 0.9f);
         }
     }
 
     /** The relic's heartbeat: calm Wardens close by come and look. */
     static void heartbeat(ServerLevel l, AncientCity.Run run, ServerPlayer carrier, long ticks) {
         for (W s : run.wardens) {
-            if (s.target != null) continue;
+            if (s.target != null || s.distractedUntil > ticks) continue;
             Warden w = entity(l, s);
             if (w == null || w.distanceTo(carrier) > HEAR_RANGE) continue;
             investigate(s, carrier.blockPosition(), ticks);

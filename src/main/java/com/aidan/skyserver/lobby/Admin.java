@@ -24,6 +24,7 @@ import java.util.UUID;
  *  /ss log <player>                  - their last 15 money/key changes
  *  /ss unmute <player>               - lift a chat mute
  *  /ss resetskills <player> confirm  - all their skills back to level 1
+ *  /ss setskill <player> <skill> <level> - 5.23: set one skill's level (no level-up rewards paid)
  *  /ss resetisland <player> confirm  - they lose their island and get a fresh one next /is
  *  /ss event doublexp <hours>        - start double XP now
  *  /ss event spleef <minutes>        - start a Spleef Tournament now
@@ -58,6 +59,13 @@ public final class Admin {
                 .then(Commands.literal("resetskills").then(Commands.argument("player", StringArgumentType.word())
                         .executes(c -> { say(c.getSource(), "§cThis sets ALL their skills back to level 1. Add §fconfirm §cto the end to do it."); return 1; })
                         .then(Commands.literal("confirm").executes(c -> resetSkills(c)))))
+                .then(Commands.literal("setskill").then(Commands.argument("player", StringArgumentType.word())
+                        .then(Commands.argument("skill", StringArgumentType.word())
+                                .suggests((c, b) -> {
+                                    for (Skills.Skill sk : Skills.Skill.values()) b.suggest(sk.name().toLowerCase(java.util.Locale.ROOT));
+                                    return b.buildFuture();
+                                })
+                                .then(Commands.argument("level", IntegerArgumentType.integer(1, Skills.LEGEND_MAX_LEVEL)).executes(Admin::setSkill)))))
                 .then(Commands.literal("resetisland").then(Commands.argument("player", StringArgumentType.word())
                         .executes(c -> { say(c.getSource(), "§cThis takes away their island (members too). They get a fresh one with /is. Add §fconfirm §cto the end to do it."); return 1; })
                         .then(Commands.literal("confirm").executes(c -> resetIsland(c)))))
@@ -80,6 +88,7 @@ public final class Admin {
         say(s, "§e/ss log <player> §7- money & key history");
         say(s, "§e/ss unmute <player>");
         say(s, "§e/ss resetskills <player> §7| §e/ss resetisland <player>");
+        say(s, "§e/ss setskill <player> <skill> <level> §7- set one skill (no rewards paid)");
         say(s, "§e/ss event doublexp <hours> §7| §e/ss event spleef <minutes>");
         say(s, "§e/ss mod add <player> §7| §e/ss mod remove <player> §7| §e/ss mod list §7- moderators (they use §e/mod§7)");
     }
@@ -100,10 +109,13 @@ public final class Admin {
         say(s, String.format(" §fTPS: %s%.1f §7(%.1f ms per tick, under 50 is good)", tps >= 19 ? "§a" : tps >= 15 ? "§e" : "§c", tps, mspt));
         say(s, " §fPlayers: §a" + real + " §7+ " + bots + " bots §8| §fMemory: §e" + used + "§7/" + max + " MB");
         say(s, " §fBackups: §e" + Backups.status());
-        say(s, " §fEvents: §e" + (Events.doubleXp() ? "double XP on" : "double XP off") + (Events.tournamentOn() ? ", tournament running" : ""));
+        say(s, " §fEvents: §e" + (Events.doubleXp() ? Events.xpEventName() + " on" : "bonus XP off") + (Events.tournamentOn() ? ", tournament running" : ""));
         Map<String, long[]> errs = com.aidan.skyserver.Safe.errors();
         if (errs.isEmpty()) say(s, " §fErrors caught: §anone");
         else errs.forEach((k, v) -> say(s, " §cErrors in '" + k + "': " + v[0] + " §7(details in logs/latest.log)"));
+        // 5.23: save files that couldn't be read (kept as they are; this run saves to <name>.new).
+        for (String f : Stacks.brokenFiles())
+            say(s, " §4Unreadable file: §f" + f + " §7- not overwritten; saving to §f" + f + ".new§7. Fix it or rename the .new file, then restart.");
     }
 
     /** A player's id from their name: online first, then the server's name cache. */
@@ -143,6 +155,24 @@ public final class Admin {
         Skills.adminReset(id);
         say(c.getSource(), "§aReset all skills for " + name + ".");
         com.aidan.skyserver.Skyserver.LOGGER.info("[SkyServer] {} reset the skills of {}", c.getSource().getTextName(), name);
+        return 1;
+    }
+
+    private static int setSkill(CommandContext<CommandSourceStack> c) {
+        String name = StringArgumentType.getString(c, "player");
+        UUID id = find(c.getSource(), name);
+        if (id == null) return 0;
+        String sk = StringArgumentType.getString(c, "skill");
+        Skills.Skill skill = null;
+        for (Skills.Skill x : Skills.Skill.values()) if (x.name().equalsIgnoreCase(sk) || x.title.equalsIgnoreCase(sk)) skill = x;
+        if (skill == null) {
+            say(c.getSource(), "§cUnknown skill. §7Use: mining, farming, shepherd, fishing, combat, building, parkour");
+            return 0;
+        }
+        int level = IntegerArgumentType.getInteger(c, "level");
+        int set = Skills.adminSetLevel(id, skill, level);
+        say(c.getSource(), "§a" + name + "'s " + skill.title + " is now level " + set + "." + (set < level ? " §7(Not a Legend: max " + Skills.MAX_LEVEL + ".)" : ""));
+        com.aidan.skyserver.Skyserver.LOGGER.info("[SkyServer] {} set {}'s {} to level {}", c.getSource().getTextName(), name, skill.title, set);
         return 1;
     }
 

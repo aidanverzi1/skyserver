@@ -16,7 +16,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /** Small helpers: items <-> JSON, named items, tagged items, and JSON files in config/skyserver/. */
 public final class Stacks {
@@ -79,17 +81,37 @@ public final class Stacks {
 
     // ---- JSON files ----
 
+    /**
+     * 5.23: files that exist but couldn't be read this run. They are never overwritten: a copy is kept as
+     * "<name>.unreadable-<time>", and saves for them go to "<name>.new" instead (rename it back once the
+     * original is fixed or given up on). /ss status lists them.
+     */
+    private static final Set<String> BROKEN = new java.util.LinkedHashSet<>();
+
+    public static Set<String> brokenFiles() {
+        return Collections.unmodifiableSet(BROKEN);
+    }
+
     public static JsonObject readFile(String name) {
         Path p = DIR.resolve(name);
+        if (!Files.exists(p)) return new JsonObject();
         try {
-            if (Files.exists(p)) return JsonParser.parseString(Files.readString(p, StandardCharsets.UTF_8)).getAsJsonObject();
+            return JsonParser.parseString(Files.readString(p, StandardCharsets.UTF_8)).getAsJsonObject();
         } catch (Exception e) {
-            Skyserver.LOGGER.warn("Couldn't read {}: {}", p, e.toString());
+            BROKEN.add(name);
+            String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+            try {
+                Files.copy(p, p.resolveSibling(p.getFileName() + ".unreadable-" + stamp), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception ignored) {
+            }
+            Skyserver.LOGGER.error("[SkyServer] Couldn't read {} ({}). It will NOT be overwritten: saves go to {}.new until it's fixed. A copy was kept as {}.unreadable-{}",
+                    p, e.toString(), name, name, stamp);
         }
         return new JsonObject();
     }
 
     public static void writeFile(String name, JsonObject json) {
+        if (BROKEN.contains(name)) name = name + ".new"; // 5.23: never overwrite a file we couldn't read
         Path p = DIR.resolve(name);
         try {
             Files.createDirectories(p.getParent());
