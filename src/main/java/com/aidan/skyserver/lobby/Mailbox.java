@@ -43,6 +43,7 @@ public final class Mailbox {
 
     public static void send(MinecraftServer server, UUID id, ItemStack stack) {
         if (stack.isEmpty()) return;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(id)) return; // 5.25: nothing is mailed home from a test trip
         load();
         MAIL.computeIfAbsent(id, k -> new ArrayList<>()).add(Stacks.toJson(server, stack));
         save();
@@ -56,6 +57,7 @@ public final class Mailbox {
 
     /** Puts as much mail as fits into the player's inventory. Returns how many items were delivered. */
     public static int deliver(ServerPlayer p) {
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(p.getUUID())) return 0; // 5.25: your mail waits until the test is over
         load();
         List<JsonElement> list = MAIL.get(p.getUUID());
         if (list == null || list.isEmpty()) return 0;

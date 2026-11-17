@@ -51,8 +51,9 @@ import static com.aidan.skyserver.lobby.LobbyDesign.G;
  *    finish of any course each day pays (same for all). Parkour skill XP: a full amount for the
  *    first finish of each course each day, a little for repeats (they only take ~10 seconds),
  *    capped each day.
- *  - Fishing Pond (5.17): walk up to the lake for a rod. Fish pay $5-20 by type and weight, plus $1 per
- *    10 Fishing levels (max +$5), for the first FISH_PAID_PER_DAY fish a day. Treasure pays $75, up to
+ *  - Fishing Pond (5.17): walk up to the lake for a rod. Fish pay $5-20 by type and weight (5.25: no
+ *    extra pay from the Fishing skill any more - fish bite sooner instead, see fishBitePercent / IslandFishing),
+ *    for the first FISH_PAID_PER_DAY fish a day. Treasure pays $75, up to
  *    $750 a day. Junk pays nothing. Any catch can be a key (the first FISH_KEY_CATCHES_PER_DAY catches a
  *    day, shared with island fishing - IslandFishing). AFK check: a catch only pays or rolls a key if you
  *    moved or looked around since your last catch.
@@ -81,8 +82,19 @@ public final class Activities {
     /** Weight ranges (lb) - the same as Old Gil's contest (SkillHalls.FISH_RANGE); trophies are heavier and pay the top. */
     static final Map<String, double[]> FISH_WEIGHT = Map.of(
             "cod", new double[]{2, 12}, "salmon", new double[]{3, 20}, "tropical_fish", new double[]{0.3, 2.5}, "pufferfish", new double[]{1, 6});
-    /** +$1 per this many Fishing levels, at most FISH_SKILL_BONUS_MAX extra per fish. */
-    static final int FISH_SKILL_BONUS_LEVELS = 10, FISH_SKILL_BONUS_MAX = 5;
+    /**
+     * 5.25: the Fishing skill makes fish bite sooner (pond and island) instead of paying more: the wait for a bite is
+     * FISH_BITE_STEP % shorter per FISH_BITE_LEVELS levels up to level 50, then FISH_BITE_STEP_LEGEND % per step (20% at 50, 30% at 100).
+     */
+    static final int FISH_BITE_LEVELS = 10, FISH_BITE_STEP = 4, FISH_BITE_STEP_LEGEND = 2, FISH_BITE_FULL_STEPS = 5, FISH_BITE_MAX_STEPS = 10;
+    /** The bite wait is never pushed below this many ticks (with Lure on top the bobber would bite the moment it lands). */
+    static final int FISH_MIN_WAIT_TICKS = 40;
+
+    /** How many % sooner fish bite at a Fishing level. */
+    static int fishBitePercent(int level) {
+        int steps = Math.max(0, Math.min(FISH_BITE_MAX_STEPS, level / FISH_BITE_LEVELS));
+        return Math.min(steps, FISH_BITE_FULL_STEPS) * FISH_BITE_STEP + Math.max(0, steps - FISH_BITE_FULL_STEPS) * FISH_BITE_STEP_LEGEND;
+    }
     /** Paid fish a day at the pond. */
     static final int FISH_PAID_PER_DAY = 100;
     /** Catches a day that can roll a key (pond + island together). */
@@ -1403,14 +1415,12 @@ public final class Activities {
         }
     }
 
-    /** What a fish pays: $lo-$hi by where its weight sits in the type's range, plus the Fishing skill bonus. */
+    /** What a fish pays: $lo-$hi by where its weight sits in the type's range (5.25: no skill bonus). */
     static long fishPay(UUID id, String path, double weight) {
         long[] pay = FISH_PAY.getOrDefault(path, new long[]{5, 10});
         double[] range = FISH_WEIGHT.getOrDefault(path, new double[]{1, 10});
         double f = weight < 0 ? 0 : Math.max(0, Math.min(1, (weight - range[0]) / (range[1] - range[0])));
-        long base = Math.round(pay[0] + (pay[1] - pay[0]) * f);
-        long bonus = Math.min(FISH_SKILL_BONUS_MAX, Skills.level(id, Skills.Skill.FISHING) / FISH_SKILL_BONUS_LEVELS);
-        return base + bonus;
+        return Math.round(pay[0] + (pay[1] - pay[0]) * f);
     }
 
     private static void caught(ServerPlayer p, ItemStack s) {

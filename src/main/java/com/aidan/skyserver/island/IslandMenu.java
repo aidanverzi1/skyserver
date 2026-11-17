@@ -95,7 +95,7 @@ public final class IslandMenu extends LockedMenu {
             box.setItem(EGG_SLOTS[i], Stacks.named(new ItemStack(EGGS[i]), "§a§l" + EGG_NAMES[i] + " Spawn Egg",
                     "§7Right-click the ground on your island", "§7to get a " + EGG_NAMES[i].toLowerCase() + ". Breed them for", "§7Shepherd XP.",
                     "§7Price: §6" + Economy.format(EGG_PRICES[i]), money, "§eClick to buy one"));
-        box.setItem(PLANTER, com.aidan.skyserver.pet.Planters.buyIcon(is));
+        box.setItem(PLANTER, com.aidan.skyserver.pet.Planters.buyIcon(viewer, is));
         box.setItem(PLANTER_SPEED, com.aidan.skyserver.pet.Planters.upgradeIcon(is));
         frame(Stacks.named(new ItemStack(Items.STAINED_GLASS_PANE.pick(DyeColor.LIGHT_BLUE)), " "));
         broadcastChanges();

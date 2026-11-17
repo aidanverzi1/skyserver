@@ -99,7 +99,7 @@ final class CityWardens {
     }
 
     static void engage(AncientCity.Run run, W s, ServerPlayer p) {
-        if (p == null || s.target != null && s.target.equals(p.getUUID())) return;
+        if (p == null || p.isSpectator() || s.target != null && s.target.equals(p.getUUID())) return; // 5.25: spectators are never hunted
         s.target = p.getUUID();
         s.lostSince = -1;
         s.investigateUntil = 0;
@@ -229,7 +229,7 @@ final class CityWardens {
             if (ticks % 200 == 0) w.getBrain().setMemoryWithExpiry(MemoryModuleType.DIG_COOLDOWN, net.minecraft.util.Unit.INSTANCE, 1200L);
             if (s.target != null) {
                 ServerPlayer p = l.getServer().getPlayerList().getPlayer(s.target);
-                if (p == null || !run.inside.contains(s.target) || AncientCity.isDowned(s.target) || p.level() != l
+                if (p == null || !run.inside.contains(s.target) || AncientCity.isDowned(s.target) || p.level() != l || p.isSpectator()
                         || run.layout.inLift(p.getX(), p.getY(), p.getZ())) {
                     disengage(l, run, s);
                     continue;

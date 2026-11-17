@@ -29,14 +29,16 @@ import java.util.*;
  * island step by step (bridge to the little island, the generator, farming, smelting, upgrades...)
  * and pay money, XP and keys along the way.
  *
- * Progress belongs to the island, so co-op members share it. Whoever finishes a step gets that
- * step's reward. Edit the steps below to change the quest line.
+ * 5.25: every player has their OWN quest line (wren-quests.json): own progress, own rewards, and it stays with
+ * them if they change islands. Island things (the islet chest, generator level, size, challenges) count for
+ * everyone on the island. Players who were on an island when 5.25 arrived start at that island's old shared
+ * quest; anyone who joins later starts at quest 1. Edit the steps below to change the quest line.
  */
 public final class IslandQuests {
     public static final String WREN_TAG = "skyserver_wren";
 
     /**
-     * REACH_ISLET, LEVEL (server level: the highest of anyone on the island), GEN (generator level),
+     * REACH_ISLET, LEVEL (the player's own server level), GEN (generator level),
      *   SIZE (expansions), CHALLENGE: island things.
      * MINED / CRAFTED: Minecraft's own block-mined / item-crafted counters, counted from when the
      *   quest starts (buying from the shop doesn't count - you have to make it).
@@ -137,11 +139,12 @@ public final class IslandQuests {
     }
     static final String[] CHAPTER_NAMES = {"Chapter 1: Settling In", "Chapter 2: The Captain's Trials", "Chapter 3: The Legend of the Skies"};
 
-    /** Short progress text for the sidebar. */
-    public static String progressShort(Islands.Island is) {
-        if (is.quest <= 0) return "§7talk to Captain Wren";
-        if (is.quest > STEPS.size()) return "§6✦ all done";
-        return "§d" + is.quest + "/" + STEPS.size() + " §7ch." + (chapterOf(is.quest) + 1);
+    /** Short progress text for the sidebar and Wren's menu (5.25: the player's own quest). */
+    public static String progressShort(UUID player) {
+        int quest = questOf(player);
+        if (quest <= 0) return "§7talk to Captain Wren";
+        if (quest > STEPS.size()) return "§6✦ all done";
+        return "§d" + quest + "/" + STEPS.size() + " §7ch." + (chapterOf(quest) + 1);
     }
 
     static int chapterOf(int step) {
@@ -199,74 +202,73 @@ public final class IslandQuests {
             return;
         }
         com.aidan.skyserver.Safe.run("wren planter catch-up", () -> com.aidan.skyserver.pet.Planters.wrenCatchUp(p, is)); // 5.24b
-        if (is.herd && is.quest != 0) {
+        if (is.herd && pq(p.getUUID()).quest != 0) {
             WrenMenu.open(p);
             return;
         }
         questTalk(p, is);
     }
 
-    /** Wren's quest talk (the old right-click). */
+    /** Wren's quest talk (the old right-click). 5.25: every player has their own quest line. */
     public static void questTalk(ServerPlayer p, Islands.Island is) {
         if (is == null) return;
+        PQ q = pq(p.getUUID());
+        boolean gaveHerd = false;
         if (!is.herd) {
+            gaveHerd = true;
             is.herd = true;
             giveHerd(p);
-            if (is.quest != 0) {
+            if (q.quest != 0) {
                 say(p, "Oh! Before I forget - I rescued these animals from the wreck. A Shepherd needs a flock!");
                 Lobby.msg(p, "§a+2 sheep, 2 cows, 2 chickens §7(feed two of a kind to breed them; shears and buckets for wool and milk)");
             }
             Islands.save();
         }
-        if (is.quest == 0) {
+        if (q.quest == 0) {
             say(p, "Ahoy there! I'm Captain Wren. My airship crashed on these islands long ago, and I've been waiting for someone like you.");
             say(p, "Help me out and I'll make it worth your while. Here's a little something to get started.");
             Economy.add(p.level().getServer(), p.getUUID(), p.getName().getString(), 100);
             Lobby.msg(p, "§a+$100 §7(Captain Wren)");
-            say(p, "And these animals came down with my airship. Look after them - sheep, cows and chickens are the start of every good farm.");
-            Lobby.msg(p, "§a+2 sheep, 2 cows, 2 chickens §7(more spawn eggs in §e/is menu§7)");
-            startStep(is, 1);
+            if (gaveHerd) {
+                say(p, "And these animals came down with my airship. Look after them - sheep, cows and chickens are the start of every good farm.");
+                Lobby.msg(p, "§a+2 sheep, 2 cows, 2 chickens §7(more spawn eggs in §e/is menu§7)");
+            }
+            startStep(q, 1);
             showTask(p, is);
             return;
         }
-        if (is.quest > STEPS.size()) {
+        if (q.quest > STEPS.size()) {
             say(p, new String[]{"Fair winds, captain.", "Have you seen how big your island's grown?", "I'll never tire of this view."}[(int) (p.level().getGameTime() / 200 % 3)]);
             return;
         }
         if (check(is, p)) return;
-        if (is.quest == CHAPTER_START[1] || is.quest == CHAPTER_START[2]) chapterIntro(p, is.quest);
+        if (q.quest == CHAPTER_START[1] || q.quest == CHAPTER_START[2]) chapterIntro(p, q.quest);
         showTask(p, is);
     }
 
     static void showTask(ServerPlayer p, Islands.Island is) {
-        if (is.quest < 1 || is.quest > STEPS.size()) return;
-        Step s = STEPS.get(is.quest - 1);
-        long prog = progress(is, s);
+        PQ q = pq(p.getUUID());
+        if (q.quest < 1 || q.quest > STEPS.size()) return;
+        Step s = STEPS.get(q.quest - 1);
+        long prog = progress(p, is, q, s);
         String count = s.amount > 1 ? " §7(" + String.format("%,d", Math.min(prog, s.amount)) + "/" + String.format("%,d", s.amount) + ")" : "";
         say(p, s.task + count);
-        int c = chapterOf(is.quest);
-        int inChapter = is.quest - CHAPTER_START[c] + 1;
+        int c = chapterOf(q.quest);
+        int inChapter = q.quest - CHAPTER_START[c] + 1;
         int chapterLen = (c + 1 < CHAPTER_START.length ? CHAPTER_START[c + 1] : STEPS.size() + 1) - CHAPTER_START[c];
         Lobby.msg(p, "§7" + CHAPTER_NAMES[c] + " - quest " + inChapter + "/" + chapterLen + " - reward §6" + Economy.format(s.money)
                 + (s.keyTier >= 0 ? " §7+ " + Keys.COLORS[s.keyTier] + Keys.NAMES[s.keyTier] + " Key" : "") + "§7. Type §e/is quest §7any time.");
-        if (c >= 2) {
-            double total = 0;
-            for (double v : is.questCredit.values()) total += v;
-            long days = (System.currentTimeMillis() - is.memberSince.getOrDefault(p.getUUID(), System.currentTimeMillis())) / (24L * 3600 * 1000);
-            int share = total <= 0 ? 0 : (int) Math.round(100 * is.questCredit.getOrDefault(p.getUUID(), 0.0) / total);
-            Lobby.msg(p, "§7Legend status: you've done §f" + share + "%§7 of the Legend quests (need " + Math.round(LEGEND_SHARE * 100)
-                    + "%) and been on this island §f" + days + "§7/" + LEGEND_DAYS + " days.");
-        }
     }
 
     /** /is quest */
     static void status(ServerPlayer p) {
         Islands.Island is = Islands.islandOf(p.getUUID());
+        PQ q = pq(p.getUUID());
         if (is == null) {
             Lobby.msg(p, "§7You don't have an island yet. Type §e/is§7.");
-        } else if (is.quest == 0) {
+        } else if (q.quest == 0) {
             Lobby.msg(p, "§7Talk to §6Captain Wren §7(in his ship room, or by the path) to start his quests.");
-        } else if (is.quest > STEPS.size()) {
+        } else if (q.quest > STEPS.size()) {
             Lobby.msg(p, "§6You're a Legend of the Skies: §ayou've finished all of Captain Wren's quests!");
         } else {
             showTask(p, is);
@@ -274,15 +276,110 @@ public final class IslandQuests {
     }
 
     // =====================================================================
+    // 5.25: every player's own quest line (wren-quests.json)
+    // =====================================================================
+
+    /** One player's place in the quest line. It stays with the player if they change islands. */
+    public static final class PQ {
+        /** 0 = hasn't met Wren yet, 1..STEPS.size() = on that quest, above = all done. */
+        public int quest;
+        /** PLACED / REACH_ISLET: how many so far on this quest. */
+        int count;
+        /** MINED / CRAFTED / STAT / COUNT: the player's counter when this quest started (-1 = not read yet). */
+        long base = -1;
+        /** Progress carried over from the old shared quest (what the rest of the island had done on this quest). */
+        long carry;
+    }
+
+    private static final String FILE = "wren-quests.json";
+    private static final Map<UUID, PQ> PLAYERS = new HashMap<>();
+    private static boolean loaded;
+
+    /** Loads the file once. The first time ever, every owner and member starts where their island's shared quest was. */
+    private static void load() {
+        if (loaded) return;
+        loaded = true;
+        com.google.gson.JsonObject root = com.aidan.skyserver.lobby.Stacks.readFile(FILE);
+        if (root.has("players")) {
+            for (Map.Entry<String, com.google.gson.JsonElement> e : root.getAsJsonObject("players").entrySet()) {
+                try {
+                    com.google.gson.JsonObject o = e.getValue().getAsJsonObject();
+                    PQ q = new PQ();
+                    q.quest = o.get("quest").getAsInt();
+                    if (o.has("count")) q.count = o.get("count").getAsInt();
+                    if (o.has("base")) q.base = o.get("base").getAsLong();
+                    if (o.has("carry")) q.carry = o.get("carry").getAsLong();
+                    PLAYERS.put(UUID.fromString(e.getKey()), q);
+                } catch (Exception ignored) {
+                }
+            }
+            return;
+        }
+        int moved = 0;
+        for (Islands.Island is : Islands.all()) {
+            if (is.quest <= 0) continue;
+            long total = 0;
+            for (long v : is.questBanked.values()) total += v;
+            List<UUID> people = new ArrayList<>(is.members);
+            people.add(is.owner);
+            for (UUID u : people) {
+                PQ q = new PQ();
+                q.quest = is.quest;
+                q.count = is.questCount;
+                Long base = is.questBase.get(u);
+                q.base = base == null ? -1 : base;
+                q.carry = Math.max(0, total - is.questBanked.getOrDefault(u, 0L));
+                PQ old = PLAYERS.get(u);
+                if (old == null || old.quest < q.quest) PLAYERS.put(u, q);
+                moved++;
+            }
+        }
+        com.aidan.skyserver.Skyserver.LOGGER.info("[SkyServer] Wren's quests are per player now: {} player(s) start at their island's quest.", moved);
+        save();
+    }
+
+    private static void save() {
+        com.google.gson.JsonObject root = new com.google.gson.JsonObject(), players = new com.google.gson.JsonObject();
+        PLAYERS.forEach((u, q) -> {
+            com.google.gson.JsonObject o = new com.google.gson.JsonObject();
+            o.addProperty("quest", q.quest);
+            o.addProperty("count", q.count);
+            o.addProperty("base", q.base);
+            o.addProperty("carry", q.carry);
+            players.add(u.toString(), o);
+        });
+        root.add("players", players);
+        com.aidan.skyserver.lobby.Stacks.writeFile(FILE, root);
+    }
+
+    private static PQ pq(UUID u) {
+        load();
+        return PLAYERS.computeIfAbsent(u, k -> new PQ());
+    }
+
+    /** A player's quest number (0 = not started, above STEPS.size() = finished). */
+    public static int questOf(UUID u) {
+        return pq(u).quest;
+    }
+
+    /** Is anyone else on this island already past this quest? (Island-wide things count for everyone.) */
+    private static boolean crewPast(Islands.Island is, UUID me, int step) {
+        List<UUID> people = new ArrayList<>(is.members);
+        people.add(is.owner);
+        for (UUID u : people) if (!u.equals(me) && pq(u).quest > step) return true;
+        return false;
+    }
+
+    // =====================================================================
     // Progress
     // =====================================================================
 
-    private static void startStep(Islands.Island is, int step) {
-        is.quest = step;
-        is.questCount = 0;
-        is.questBase.clear();
-        is.questBanked.clear();
-        Islands.save();
+    private static void startStep(PQ q, int step) {
+        q.quest = step;
+        q.count = 0;
+        q.base = -1;
+        q.carry = 0;
+        save();
     }
 
     private static long stat(ServerPlayer p, Step s) {
@@ -310,46 +407,32 @@ public final class IslandQuests {
         return p.getStats().getValue(Stats.ITEM_CRAFTED.get(BuiltInRegistries.ITEM.getValue(id)));
     }
 
-    /** Updates members' progress from their stats (online ones) and returns the island's total. */
-    private static long progress(Islands.Island is, Step s) {
+    /**
+     * 5.25: this player's progress on their quest. Counting quests only count what the player does themselves
+     * (from when the quest started); island things (the islet chest, generator, size, challenges) count for
+     * everyone on the island.
+     */
+    private static long progress(ServerPlayer p, Islands.Island is, PQ q, Step s) {
         switch (s.kind) {
             case TOTAL, SKILL -> {
-                // The best of the island's members (all-time numbers, not counted from the start).
-                var server = Lobby.server();
-                List<UUID> people = new ArrayList<>(is.members);
-                people.add(is.owner);
-                for (UUID u : people) {
-                    ServerPlayer m = server == null ? null : server.getPlayerList().getPlayer(u);
-                    if (m != null) is.questBanked.put(u, stat(m, s));
-                }
-                long best = 0;
-                for (long v : is.questBanked.values()) best = Math.max(best, v);
-                return best;
+                return stat(p, s);
             }
             case MINED, CRAFTED, STAT, COUNT -> {
-                var server = Lobby.server();
-                List<UUID> people = new ArrayList<>(is.members);
-                people.add(is.owner);
-                for (UUID u : people) {
-                    ServerPlayer m = server == null ? null : server.getPlayerList().getPlayer(u);
-                    if (m == null) continue;
-                    long now = stat(m, s);
-                    Long base = is.questBase.get(u);
-                    if (base == null) {
-                        is.questBase.put(u, now);
-                        continue;
-                    }
-                    is.questBanked.put(u, Math.max(0, now - base));
+                long now = stat(p, s);
+                if (q.base < 0) {
+                    q.base = now;
+                    save();
                 }
-                long total = 0;
-                for (long v : is.questBanked.values()) total += v;
-                return total;
+                return Math.max(0, now - q.base) + q.carry;
             }
-            case PLACED, REACH_ISLET -> {
-                return is.questCount;
+            case PLACED -> {
+                return q.count;
+            }
+            case REACH_ISLET -> {
+                return q.count > 0 || crewPast(is, p.getUUID(), q.quest) ? 1 : 0;
             }
             case LEVEL -> {
-                return is.level();
+                return Levels.level(p.getUUID());
             }
             case GEN -> {
                 return is.genLevel;
@@ -364,95 +447,46 @@ public final class IslandQuests {
         return 0;
     }
 
-    /** Days in the crew and share of the Legend quests needed to be named a Legend with the finisher. */
-    public static final int LEGEND_DAYS = 20;
-    public static final double LEGEND_SHARE = 0.20;
-
-    /**
-     * Credit for a finished Legend (chapter 3) quest: counted quests are shared by how much each
-     * member did; the others go to whoever met the goal (or finished it).
-     */
-    private static void credit(Islands.Island is, Step s, ServerPlayer finisher) {
-        if (chapterOf(is.quest) < 2) return;
-        Map<UUID, Double> share = new HashMap<>();
-        switch (s.kind) {
-            case MINED, CRAFTED, STAT, COUNT -> {
-                double total = 0;
-                for (long v : is.questBanked.values()) total += v;
-                if (total > 0) for (Map.Entry<UUID, Long> e : is.questBanked.entrySet()) share.put(e.getKey(), e.getValue() / total);
-            }
-            case TOTAL, SKILL -> {
-                List<UUID> met = new ArrayList<>();
-                for (Map.Entry<UUID, Long> e : is.questBanked.entrySet()) if (e.getValue() >= s.amount) met.add(e.getKey());
-                for (UUID u : met) share.put(u, 1.0 / met.size());
-            }
-            default -> {}
-        }
-        if (share.isEmpty()) share.put(finisher.getUUID(), 1.0);
-        share.forEach((u, v) -> is.questCredit.merge(u, v, Double::sum));
-    }
-
-    /** Everyone who gets Legend status: in the crew 20+ days and did 20%+ of the Legend quests. */
-    private static List<UUID> legends(Islands.Island is) {
-        double total = 0;
-        for (double v : is.questCredit.values()) total += v;
-        long now = System.currentTimeMillis(), need = LEGEND_DAYS * 24L * 3600 * 1000;
-        List<UUID> out = new ArrayList<>();
-        List<UUID> people = new ArrayList<>(is.members);
-        people.add(is.owner);
-        for (UUID u : people) {
-            long since = is.memberSince.getOrDefault(u, now);
-            double mine = is.questCredit.getOrDefault(u, 0.0);
-            if (now - since >= need && total > 0 && mine / total >= LEGEND_SHARE) out.add(u);
-        }
-        return out;
-    }
-
-    /** Finishes the current step if it's done (rewarding p). Returns true if a step was finished. */
+    /** Finishes the player's current quest if it's done (rewarding them). Returns true if a quest was finished. */
     static boolean check(Islands.Island is, ServerPlayer p) {
-        if (is.quest < 1 || is.quest > STEPS.size()) return false;
-        Step s = STEPS.get(is.quest - 1);
-        if (progress(is, s) < s.amount) return false;
-        credit(is, s, p);
+        PQ q = pq(p.getUUID());
+        if (q.quest < 1 || q.quest > STEPS.size()) return false;
+        Step s = STEPS.get(q.quest - 1);
+        if (progress(p, is, q, s) < s.amount) return false;
         var server = p.level().getServer();
         say(p, s.done);
         Economy.add(server, p.getUUID(), p.getName().getString(), s.money);
-        Lobby.msg(p, "§a+" + Economy.format(s.money) + " §7(quest " + is.quest + " done)");
+        Lobby.msg(p, "§a+" + Economy.format(s.money) + " §7(quest " + q.quest + " done)");
         Levels.addXp(server, p, s.xp);
         if (s.keyTier >= 0) Keys.reward(server, p.getUUID(), s.keyTier, 1, "(Captain Wren's quest)");
-        if (is.quest == com.aidan.skyserver.pet.PetItems.SNACK_PLANT_STEP) com.aidan.skyserver.Safe.run("wren snack plant", () -> com.aidan.skyserver.pet.PetItems.wrenPlant(p)); // 5.24
+        // 5.25: Wren's free Little Snack Planter only goes to the island's owner.
+        if (q.quest == com.aidan.skyserver.pet.PetItems.SNACK_PLANT_STEP && is.owner.equals(p.getUUID()))
+            com.aidan.skyserver.Safe.run("wren snack plant", () -> com.aidan.skyserver.pet.PetItems.wrenPlant(p)); // 5.24
         com.aidan.skyserver.lobby.Skills.add(p, com.aidan.skyserver.lobby.Skills.Skill.BUILDING, 40);
         com.aidan.skyserver.lobby.BattlePass.event(p, "wren_quest", 1);
         p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 1f, 1.2f);
-        for (UUID u : is.members) {
+        List<UUID> crew = new ArrayList<>(is.members);
+        crew.add(is.owner);
+        for (UUID u : crew) {
             ServerPlayer m = server.getPlayerList().getPlayer(u);
-            if (m != null && m != p) Lobby.msg(m, "§6[Captain Wren] §f" + p.getName().getString() + " finished quest " + is.quest + ": " + s.task);
+            if (m != null && m != p) Lobby.msg(m, "§6[Captain Wren] §f" + p.getName().getString() + " finished quest " + q.quest + ": " + s.task);
         }
-        startStep(is, is.quest + 1);
-        if (is.quest > STEPS.size()) {
+        startStep(q, q.quest + 1);
+        if (q.quest > STEPS.size()) {
             say(p, "There's nothing left I can teach you. Fair winds, always.");
-            // Legend status (skills past level 50) for everyone in the crew who earned it.
-            // (The rewards above go out once, to whoever finished the last quest.)
-            List<String> names = new ArrayList<>();
-            for (UUID u : legends(is)) {
-                if (com.aidan.skyserver.lobby.Skills.isLegend(u)) continue;
-                com.aidan.skyserver.lobby.PlayerStats.add(u, "legend", 1);
-                String name = u.equals(is.owner) ? is.ownerName : is.memberNames.getOrDefault(u, "?");
-                names.add(name);
-                ServerPlayer m = server.getPlayerList().getPlayer(u);
-                if (m != null) Lobby.msg(m, "§6§l✦ LEGEND OF THE SKIES! §eYour skills can now go past level 50, all the way to "
+            // 5.25: Legend status (skills past level 50) goes to the player who finished their own quest line.
+            if (!com.aidan.skyserver.lobby.Skills.isLegend(p.getUUID())) {
+                com.aidan.skyserver.lobby.PlayerStats.add(p.getUUID(), "legend", 1);
+                Lobby.msg(p, "§6§l✦ LEGEND OF THE SKIES! §eYour skills can now go past level 50, all the way to "
                         + com.aidan.skyserver.lobby.Skills.LEGEND_MAX_LEVEL + ".");
+                server.getPlayerList().broadcastSystemMessage(Component.literal("§6§l✦ §e" + p.getName().getString()
+                        + " §6has become a Legend of the Skies! §7(finished all of Captain Wren's quests)"), false);
             }
-            if (names.isEmpty() && !com.aidan.skyserver.lobby.Skills.isLegend(p.getUUID()))
-                Lobby.msg(p, "§7(Nobody on the island has been in the crew " + LEGEND_DAYS + " days and done " + Math.round(LEGEND_SHARE * 100)
-                        + "% of the Legend quests yet, so no one was named a Legend. Legend status lets skills go past level 50.)");
-            if (!names.isEmpty()) p.level().getServer().getPlayerList().broadcastSystemMessage(Component.literal("§6§l✦ §e" + String.join(", ", names)
-                    + " §6" + (names.size() == 1 ? "has" : "have") + " become " + (names.size() == 1 ? "a Legend" : "Legends") + " of the Skies! §7(finished all of Captain Wren's quests)"), false);
         } else {
-            for (int start : CHAPTER_START) if (is.quest == start) {
+            for (int start : CHAPTER_START) if (q.quest == start) {
                 chapterIntro(p, start);
-                p.level().getServer().getPlayerList().broadcastSystemMessage(Component.literal("§6✦ §e" + p.getName().getString()
-                        + " §7finished " + CHAPTER_NAMES[chapterOf(is.quest) - 1] + "!"), false);
+                server.getPlayerList().broadcastSystemMessage(Component.literal("§6✦ §e" + p.getName().getString()
+                        + " §7finished " + CHAPTER_NAMES[chapterOf(q.quest) - 1] + "!"), false);
             }
             showTask(p, is);
         }
@@ -461,25 +495,30 @@ public final class IslandQuests {
 
     /** A block was placed on an island by a member. */
     static void onPlace(ServerPlayer p, Islands.Island is, BlockState placed) {
-        if (is.quest < 1 || is.quest > STEPS.size()) return;
-        Step s = STEPS.get(is.quest - 1);
+        PQ q = pq(p.getUUID());
+        if (q.quest < 1 || q.quest > STEPS.size()) return;
+        Step s = STEPS.get(q.quest - 1);
         if (s.kind != Kind.PLACED) return;
         String id = BuiltInRegistries.BLOCK.getKey(placed.getBlock()).getPath();
         boolean match = s.target.equals("#sapling") ? id.endsWith("_sapling") || id.equals("mangrove_propagule") : id.equals(s.target);
         if (!match) return;
-        is.questCount++;
-        if (is.questCount >= s.amount) check(is, p);
-        else if (is.questCount % 4 == 0) com.aidan.skyserver.lobby.Announce.actionBar(p, "§6Quest: §f" + is.questCount + "/" + s.amount);
+        q.count++;
+        if (q.count >= s.amount) check(is, p);
+        else if (q.count % 4 == 0) {
+            save();
+            com.aidan.skyserver.lobby.Announce.actionBar(p, "§6Quest: §f" + q.count + "/" + s.amount);
+        }
     }
 
     /** Every couple of seconds for each member on their island. */
     static void tick(ServerPlayer p, Islands.Island is) {
-        if (is.quest < 1 || is.quest > STEPS.size()) return;
-        Step s = STEPS.get(is.quest - 1);
-        if (s.kind == Kind.REACH_ISLET && is.questCount == 0) {
+        PQ q = pq(p.getUUID());
+        if (q.quest < 1 || q.quest > STEPS.size()) return;
+        Step s = STEPS.get(q.quest - 1);
+        if (s.kind == Kind.REACH_ISLET && q.count == 0) {
             double ix = is.cx() + IslandDesign.ISLET[0] + 0.5, iz = is.cz() + IslandDesign.ISLET[2] + 0.5;
             if (Math.hypot(p.getX() - ix, p.getZ() - iz) < IslandDesign.ISLET_RADIUS + 1 && p.getY() > Islands.TOP_Y - 1 && p.onGround()) {
-                is.questCount = 1;
+                q.count = 1;
             }
         }
         check(is, p);

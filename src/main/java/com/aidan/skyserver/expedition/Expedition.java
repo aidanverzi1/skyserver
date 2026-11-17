@@ -217,6 +217,8 @@ public final class Expedition {
         boolean building = true;
         long buildStart;
         ExpeditionBoss.Fight fight;
+        /** 5.25: an op's test trip (/ss test nether): no deposit, no rewards (ExpeditionTest). */
+        boolean test = false;
     }
 
     /** 5.15 / 5.17: a player who is down. phase 0 = waiting for a teammate, 1 = the paid offer. */
@@ -313,6 +315,8 @@ public final class Expedition {
     public static void init() {
         EndExpedition.init(); // 5.18: the End Expedition (its own listeners, registered first like ours)
         ExpeditionGold.init(); // 5.19: the 5 trapped gold blocks on the bridges
+        ExpeditionSiege.init(); // 5.25: ranged guards break player-placed blocks (hiding / towering up)
+        ExpeditionTest.init(); // 5.25: /ss test - op test trips for every expedition
         AncientCity.init();    // 5.19: the Ancient City Expedition (registered before Lobby, like the End)
         SunkenMonument.init(); // 5.20: the Sunken Monument Expedition
         com.aidan.skyserver.island.WrenRoom.init(); // 5.20: Captain Wren's ship room (before Islands' own handlers)
@@ -894,6 +898,26 @@ public final class Expedition {
             if (!is.isMember(m.getUUID())) sendHome(m, is);
         }
         PENDING.remove(is.id);
+    }
+
+    /** 5.25 (ExpeditionTest): starts a test trip for these players from the first one's island. Null = started, else why not. */
+    static String startTest(List<ServerPlayer> crew, int d) {
+        ServerPlayer lead = crew.get(0);
+        Islands.Island is = Islands.islandOf(lead.getUUID());
+        if (is == null) return lead.getName().getString() + " has no island (a Nether trip flies from one).";
+        if (RUNS.containsKey(is.id)) return "A Nether trip from " + lead.getName().getString() + "'s island is already running.";
+        for (ServerPlayer p : crew) if (PLAYER_RUN.containsKey(p.getUUID())) return p.getName().getString() + " is already on a Nether trip.";
+        if (level() == null) return "The Nether Expedition world isn't loaded.";
+        boolean fortress = RNG.nextBoolean();
+        Run run = startRun(is, d, fortress, lead, crew);
+        if (run == null) run = startRun(is, d, !fortress, lead, crew);
+        if (run == null) return "Wren couldn't find a place to build the map - try again.";
+        run.test = true;
+        return null;
+    }
+
+    static boolean onTrip(UUID id) {
+        return PLAYER_RUN.containsKey(id);
     }
 
     private static Run startRun(Islands.Island is, int diff, boolean fortress, ServerPlayer leader, List<ServerPlayer> crew) {
@@ -1654,6 +1678,7 @@ public final class Expedition {
         List<ServerPlayer> in = inside(run);
         // 5.17: everyone paid for their own place, so everyone gets the whole reward.
         long money = ExpeditionLoot.vaultMoney(d);
+        if (run.test) for (ServerPlayer m : in) Lobby.msg(m, "§b§lTEST CLEAR! §7No rewards on a test trip (your own inventory comes back when you go home).");
         for (ServerPlayer m : in) {
             Announce.title(m, "§6§lVICTORY!", "§7The §6Treasure Vault §7is open!", 5, 60, 15);
             Economy.add(server, m.getUUID(), m.getName().getString(), money);

@@ -60,6 +60,7 @@ public final class Economy {
 
     public static boolean add(MinecraftServer server, UUID id, String name, long amount) {
         if (amount <= 0) return true;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(id)) return true; // 5.25: no money on a test trip
         TxLog.money(id, name, amount);
         if (ready(server)) {
             try {
@@ -78,6 +79,7 @@ public final class Economy {
     /** Takes money if they have enough. False = not enough (or economy unavailable). */
     public static boolean take(MinecraftServer server, UUID id, long amount) {
         if (amount <= 0) return true;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.freeSpend(id)) return true; // 5.25: test trips cost nothing inside the expedition
         if (!ready(server)) return false;
         try {
             if ((long) getBalance.invoke(balances, id) < amount) return false;

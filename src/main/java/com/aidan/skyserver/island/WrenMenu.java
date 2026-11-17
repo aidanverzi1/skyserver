@@ -24,7 +24,7 @@ public final class WrenMenu extends LockedMenu {
         super(id, inv, box, 3, viewer);
         Islands.Island is = Islands.islandOf(viewer.getUUID());
         box.setItem(QUESTS, Stacks.named(new ItemStack(Items.WRITABLE_BOOK), "§6§lCaptain Wren's Quests",
-                "§7Now: §f" + (is == null ? "-" : IslandQuests.progressShort(is)), "§eClick to talk about quests"));
+                "§7Now: §f" + (is == null ? "-" : IslandQuests.progressShort(viewer.getUUID())), "§eClick to talk about quests"));
         box.setItem(NETHER, ExpeditionMenu.islandButton(viewer));
         box.setItem(END, EndExpedition.islandButton(viewer));
         box.setItem(CITY, AncientCity.islandButton(viewer));

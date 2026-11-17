@@ -171,6 +171,7 @@ public final class EndRewards {
     /** A wave guard died: every crew member gets their own rolls. */
     static void guard(List<ServerPlayer> crew, EndMobs.Kind kind, int tier, double scale) {
         for (ServerPlayer p : crew) {
+            if (ExpeditionTest.isTesting(p.getUUID())) continue; // 5.25: test trips give nothing (and use up no once-only rewards)
             int f = guardFragments(tier, scale);
             if (f > 0) give(p, fragments(f));
             if (roll(CHORUS_CHANCE)) give(p, new ItemStack(Items.CHORUS_FLOWER));
@@ -185,6 +186,7 @@ public final class EndRewards {
     /** A mini boss died. which = 0 for the trip's first mini boss (wave 5), 1 for wave 15, 2+ after. */
     static void miniBoss(MinecraftServer server, List<ServerPlayer> crew, int which, int tier, double bonus) {
         for (ServerPlayer p : crew) {
+            if (ExpeditionTest.isTesting(p.getUUID())) continue; // 5.25: test trips give nothing (and use up no once-only rewards)
             give(p, fragments(scaled(3 + 2 * tier, bonus)));
             if (roll(SHELL_CHANCE[Math.min(which, SHELL_CHANCE.length - 1)])) give(p, new ItemStack(Items.SHULKER_SHELL));
             else Lobby.msg(p, "§7No shulker shell this time.");
@@ -199,6 +201,7 @@ public final class EndRewards {
     /** A boss died at this wave. dragon = it was the Ender Dragon. */
     static void boss(MinecraftServer server, List<ServerPlayer> crew, int wave, int tier, boolean dragon, double bonus) {
         for (ServerPlayer p : crew) {
+            if (ExpeditionTest.isTesting(p.getUUID())) continue; // 5.25: test trips give nothing (and use up no once-only rewards)
             give(p, fragments(scaled(5 + 3 * tier, bonus)));
             if (roll(BOSS_BONUS_CHANCE)) {
                 give(p, fragments(scaled(BOSS_BONUS_FRAGMENTS, bonus)));
@@ -228,6 +231,7 @@ public final class EndRewards {
     /** Every 10th wave: money on the spot; wave 30: the Voidwalker Pearl (once per player). */
     static void milestone(MinecraftServer server, List<ServerPlayer> crew, int wave) {
         for (ServerPlayer p : crew) {
+            if (ExpeditionTest.isTesting(p.getUUID())) continue; // 5.25: test trips give nothing (and use up no once-only rewards)
             Economy.add(server, p.getUUID(), p.getName().getString(), EndExpedition.MONEY_PER_TEN);
             Lobby.msg(p, "§6+" + Economy.format(EndExpedition.MONEY_PER_TEN) + " §7for reaching wave " + wave + "! §8(already in your account)");
             if (wave == 10 || wave == 20 || wave == 30) com.aidan.skyserver.lobby.Charts.stamp(p, "end_" + wave); // 5.19: Wren's Charts

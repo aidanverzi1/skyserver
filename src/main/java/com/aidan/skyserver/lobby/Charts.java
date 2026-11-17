@@ -49,6 +49,7 @@ public final class Charts {
     /** Stamps a chart (nothing happens if it already has it). Bots are ignored. */
     public static void stamp(ServerPlayer p, String id) {
         if (p == null || com.aidan.skyserver.bots.BotManager.isBot(p.getUUID())) return;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(p.getUUID())) return; // 5.25: no stamps on a test trip
         load();
         String label = null;
         for (String[] s : STAMPS) if (s[0].equals(id)) label = s[1] + " §7- " + s[2];

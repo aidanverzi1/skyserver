@@ -78,6 +78,7 @@ public final class Keys {
 
     /** Gives keys and tells the player (if online). */
     public static void reward(MinecraftServer server, UUID id, int tier, int amount, String why) {
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(id)) return; // 5.25: no rewards on a test trip
         give(id, tier, amount);
         ServerPlayer p = server.getPlayerList().getPlayer(id);
         if (p != null) {

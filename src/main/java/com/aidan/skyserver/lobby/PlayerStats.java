@@ -29,6 +29,7 @@ public final class PlayerStats {
 
     public static void add(ServerPlayer p, String key, long amount) {
         if (p == null || amount <= 0 || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(p.getUUID())) return; // 5.25: test trips don't count
         load();
         DATA.computeIfAbsent(p.getUUID(), k -> new HashMap<>()).merge(key, amount, Long::sum);
         dirty = true;
@@ -37,6 +38,7 @@ public final class PlayerStats {
     /** Same, by id (for players who may be offline). */
     public static void add(UUID id, String key, long amount) {
         if (id == null || amount <= 0 || com.aidan.skyserver.bots.BotManager.isBot(id)) return;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(id)) return; // 5.25: test trips don't count
         load();
         DATA.computeIfAbsent(id, k -> new HashMap<>()).merge(key, amount, Long::sum);
         dirty = true;

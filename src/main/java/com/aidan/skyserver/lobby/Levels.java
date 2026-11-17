@@ -116,6 +116,7 @@ public final class Levels {
     /** Adds XP (with the daily double-XP boost and the caps above) and hands out level-up rewards. */
     public static void addXp(MinecraftServer server, ServerPlayer p, int amount) {
         if (amount <= 0 || p == null || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(p.getUUID())) return; // 5.25: no rewards on a test trip
         amount = Boosters.xp(p, Events.xp(amount)); // 5.8: XP boosters
         PlayerProfile prof = PlayerCache.get(p);
         if (source() == Source.SIDE) {

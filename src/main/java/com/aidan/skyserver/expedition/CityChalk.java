@@ -51,7 +51,8 @@ import java.util.*;
  *  - Stand within MERGE_RANGE of a crewmate for MERGE_TICKS: your maps merge (paths, walls, dead ends, sensors -
  *    not the gold markers, those stay your own).
  *  - Wren's lift has a 3 x 3 WALL MAP (item frames on the back wall, 3 pixels per block) showing the whole crew's
- *    chalk put together.
+ *    chalk put together (5.25: plus the crew's gold flags).
+ *  - 5.25: every chalk shows the middle from the start: the plaza's outline (purple) and a monument mark.
  *  - The map starts blank every trip (the maze is the same all week, so a map kept between trips would give it away).
  *
  * The map ids are far above anything vanilla hands out, and no saved map data exists for them: the server only
@@ -207,7 +208,7 @@ final class CityChalk {
     }
 
     private static void give(ServerPlayer p, Chalk c) {
-        ItemStack m = mapItem(c.mapId, "§6§lWren's Chalk Map", "§7Draws where you've walked.", "§7Gold flag = a room you looted.",
+        ItemStack m = mapItem(c.mapId, "§6§lWren's Chalk Map", "§7Draws where you've walked.", "§7Gold flag = a room you looted.", "§dPurple = the middle of the city.",
                 "§7Stand still holding it to see yourself.", "§eRight-click: §fclose-up / whole city");
         Inventory inv = p.getInventory();
         if (inv.getItem(8).isEmpty()) inv.setItem(8, m);
@@ -304,7 +305,10 @@ final class CityChalk {
         // Stars change when a chest is looted: cheap to check by count.
         if (ticks % 20 == 0) for (ServerPlayer p : in) {
             Chalk c = b.chalks.get(p.getUUID());
-            if (c != null) c.dirty |= starsChanged(run, p.getUUID(), c);
+            if (c != null && starsChanged(run, p.getUUID(), c)) {
+                c.dirty = true;
+                b.wallDirty = true; // 5.25: the wall map shows the whole crew's flags
+            }
         }
         // Send.
         for (ServerPlayer p : in) {
@@ -317,7 +321,7 @@ final class CityChalk {
         if (b.wallDirty && ticks - b.wallSent >= 40 && !b.frames.isEmpty()) {
             b.wallDirty = false;
             b.wallSent = ticks;
-            sendWall(b, in);
+            sendWall(run, b, in);
         }
         if (ticks % 100 == 0) keepFrames(l, b);
     }
@@ -443,9 +447,18 @@ final class CityChalk {
             for (int y = 0; y < 128; y++) {
                 int bx = ox + x / sc, bz = oz + y / sc;
                 int id = b.idx(bx, bz);
-                px[x + y * 128] = id < 0 ? 0 : pixel(c.seen[id], c.walked[id]);
+                px[x + y * 128] = id < 0 ? 0 : c.seen[id] == UNKNOWN && plazaEdge(b, bx, bz) ? plazaColour() : pixel(c.seen[id], c.walked[id]);
             }
         byte red = col(MapColor.COLOR_RED, MapColor.Brightness.HIGH), cyan = col(MapColor.COLOR_CYAN, MapColor.Brightness.HIGH);
+        // 5.25: the monument mark in the middle of the city (on the close-up it sits in the inner corner = which way the middle is).
+        {
+            int mX = (b.cx - ox) * sc + sc / 2, mY = (b.cz - oz) * sc + sc / 2, r = sc == 2 ? 5 : 3;
+            for (int dx = -r; dx <= r; dx++)
+                for (int dy = -r; dy <= r; dy++) {
+                    int m = Math.abs(dx) + Math.abs(dy);
+                    if (m <= r) put(px, mX + dx, mY + dy, m <= r - 2 ? monumentCore() : plazaColour());
+                }
+        }
         // Dead ends: a small X in the middle of the cell.
         int n = AncientCityMap.N;
         for (int cell : c.deadEnds) {
@@ -480,7 +493,7 @@ final class CityChalk {
     }
 
     /** The crew's chalk on the 3 x 3 wall map (3 px per block). */
-    private static void sendWall(Board b, List<ServerPlayer> in) {
+    private static void sendWall(AncientCity.Run run, Board b, List<ServerPlayer> in) {
         int size = b.size;
         byte[] seen = new byte[size * size];
         boolean[] walked = new boolean[size * size];
@@ -498,7 +511,8 @@ final class CityChalk {
         for (int X = 0; X < 384; X++)
             for (int Y = 0; Y < 384; Y++) {
                 int lx = (X - margin) / sc, lz = (Y - margin) / sc;
-                byte v = X < margin || Y < margin || lx >= size || lz >= size ? 0 : pixel(seen[lx * size + lz], walked[lx * size + lz]);
+                byte v = X < margin || Y < margin || lx >= size || lz >= size ? 0
+                        : seen[lx * size + lz] == UNKNOWN && plazaEdge(b, b.ox + lx, b.oz + lz) ? plazaColour() : pixel(seen[lx * size + lz], walked[lx * size + lz]);
                 tiles[(Y / 128) * 3 + X / 128][(X % 128) + (Y % 128) * 128] = v;
             }
         int n = AncientCityMap.N;
@@ -510,11 +524,46 @@ final class CityChalk {
                 putWall(tiles, X0 + t, Y0 - t, red);
             }
         }
+        // 5.25: the monument mark, and a gold flag on every room anyone in the crew has looted.
+        {
+            int mX = margin + (b.cx - b.ox) * sc + 1, mY = margin + (b.cz - b.oz) * sc + 1, r = 7;
+            for (int dx = -r; dx <= r; dx++)
+                for (int dy = -r; dy <= r; dy++) {
+                    int m = Math.abs(dx) + Math.abs(dy);
+                    if (m <= r) putWall(tiles, mX + dx, mY + dy, m <= r - 3 ? monumentCore() : plazaColour());
+                }
+        }
+        List<List<MapDecoration>> flags = new ArrayList<>();
+        for (int t = 0; t < 9; t++) flags.add(new ArrayList<>());
+        Holder<MapDecorationType> flag = deco("banner_yellow");
+        for (AncientCityMap.House h : run.layout.houses) {
+            Set<UUID> got = run.looted.get(h.chest.asLong());
+            if (got == null || got.isEmpty()) continue;
+            double mx = (h.door.getX() + h.chest.getX()) / 2.0 + 0.5, mz = (h.door.getZ() + h.chest.getZ()) / 2.0 + 0.5;
+            int X = margin + (int) Math.round((mx - b.ox) * sc), Y = margin + (int) Math.round((mz - b.oz) * sc);
+            if (X < 0 || Y < 0 || X >= 384 || Y >= 384) continue;
+            MapDecoration d = decoAt(flag, X % 128, Y % 128, 0, 0, 1, 0);
+            if (d != null) flags.get((Y / 128) * 3 + X / 128).add(d);
+        }
         for (int t = 0; t < 9; t++) {
-            ClientboundMapItemDataPacket pk = new ClientboundMapItemDataPacket(new MapId(b.wallBase + t), (byte) 0, true, Optional.of(List.of()),
+            ClientboundMapItemDataPacket pk = new ClientboundMapItemDataPacket(new MapId(b.wallBase + t), (byte) 0, true, Optional.of(flags.get(t)),
                     Optional.of(new MapItemSavedData.MapPatch(0, 0, 128, 128, tiles[t])));
             for (ServerPlayer p : in) p.connection.send(pk);
         }
+    }
+
+    /** 5.25: the outline of the middle plaza (the wall line round the dome), drawn on every chalk from the start. */
+    private static boolean plazaEdge(Board b, int x, int z) {
+        int e = AncientCityMap.DOME + 2, dx = Math.abs(x - b.cx), dz = Math.abs(z - b.cz);
+        return dx == e && dz <= e || dz == e && dx <= e;
+    }
+
+    private static byte plazaColour() {
+        return col(MapColor.COLOR_PURPLE, MapColor.Brightness.HIGH);
+    }
+
+    private static byte monumentCore() {
+        return col(MapColor.SNOW, MapColor.Brightness.HIGH);
     }
 
     private static void put(byte[] px, int x, int y, byte v) {

@@ -68,7 +68,7 @@ import java.nio.file.*;
 import java.util.*;
 
 /**
- * 5.19 / 5.21: the ANCIENT CITY EXPEDITION - a stealth trip through a 125 x 125 deepslate maze (AncientCityMap).
+ * 5.19 / 5.21: the ANCIENT CITY EXPEDITION - a stealth trip through a 101 x 101 deepslate maze (AncientCityMap).
  *
  * HOW A TRIP GOES (5.21)
  *  - Talk to Captain Wren -> Ancient City. Price per player: $5k / $10k / $20k / $40k, or 1,000 / 2,000 / 4,000 /
@@ -77,7 +77,7 @@ import java.util.*;
  *  - THE NOISE METER: one meter for the whole crew (0-100%, +35% room per extra player). Walking makes noise
  *    (less on carpet, much less crouching, none crouching on carpet); so do landing, placing and breaking blocks,
  *    chests, urns, sensors going off, shriekers, the relic's heartbeat, eating and getting hurt. Every number is
- *    x0.6 / x0.8 / x1.0 / x1.3 by difficulty. It drops 1 point every 20 seconds of silence, never below a
+ *    x0.6 / x0.8 / x1.0 / x1.3 by difficulty. It drops 1% every 15 seconds of silence (5.25), never below a
  *    milestone already passed:
  *      25% - nearby house candles go out (no more telling real from decoy there), darkness pulses
  *      50% - the Wardens go after the loudest player
@@ -132,7 +132,7 @@ public final class AncientCity {
             SHRIEK = 15, HEART = 0.5, EAT = 1, HURT = 3, RATTLE = 1, THROW = 5, TONIC = 1;
     static final int[] HEARTBEAT_SECONDS = {8, 6, 5, 4};
     static final int[] MILESTONES = {25, 50, 75, 90, 100};
-    static final int DECAY_SECONDS = 20, DARKNESS_EVERY = 20, SELF_SHRIEK_EVERY = 25, ROPE_PULL_SECONDS = 60, SILENT_PCT = 33;
+    static final int DECAY_SECONDS = 15, DARKNESS_EVERY = 20, SELF_SHRIEK_EVERY = 25, ROPE_PULL_SECONDS = 60, SILENT_PCT = 33;
 
     // ---- Rewards ----
     static final int[] ESCAPE_CC = {175, 350, 700, 1_400}, SWEEP_CC = {60, 120, 250, 500}, VAULT_CC = {150, 300, 600, 1_200};
@@ -196,6 +196,8 @@ public final class AncientCity {
         final Map<UUID, Vec3> rattles = new HashMap<>();
         final Set<UUID> relicItems = new HashSet<>();
         final List<Object[]> lenses = new ArrayList<>(); // {player uuid, until tick}
+        /** 5.25: an op's test trip (/ss test city): no price, no rewards (ExpeditionTest). */
+        boolean test = false;
 
         Run(int id, int diff, int islandId, UUID leader, int map) {
             this.id = id;
@@ -748,6 +750,30 @@ public final class AncientCity {
         }
     }
 
+    /** 5.25 (ExpeditionTest): a test trip for these players right away (this week's map). Null = started, else why not. */
+    static String startTest(List<ServerPlayer> crew, int d) {
+        for (ServerPlayer p : crew) if (onTrip(p.getUUID()) || musterOf(p.getUUID()) != null) return p.getName().getString() + " is already on an Ancient City crew.";
+        ServerLevel l = level();
+        if (l == null) return "The Ancient City world isn't loaded.";
+        ServerPlayer lead = crew.get(0);
+        Islands.Island is = Islands.islandOf(lead.getUUID());
+        Run run = new Run(runCounter++, d, is == null ? -1 : is.id, lead.getUUID(), CityMarket.mapIndex());
+        run.test = true;
+        for (ServerPlayer p : crew) run.crew.add(p.getUUID());
+        BlockPos center = new BlockPos(2_000 + (run.id % 16) * 400, AncientCityMap.FLOOR_Y, 2_000 + (run.id / 16 % 16) * 400);
+        run.layout = AncientCityMap.plan(l, center, run.map, run.diff, RNG);
+        for (BlockPos u : run.layout.urns) run.urnsLeft.add(u.asLong());
+        run.timeLimit = TIME_LIMITS[run.diff];
+        RUNS.add(run);
+        Skyserver.LOGGER.info("[City] TEST trip #{} ({}, map {}, crew of {})", run.id, DIFF_NAMES[run.diff], run.map + 1, run.crew.size());
+        return null;
+    }
+
+    static boolean onTrip(UUID id) {
+        for (Run r : RUNS) if (!r.over && r.crew.contains(id)) return true;
+        return false;
+    }
+
     /** The city is built: the crew steps off the lift. */
     private static void arrive(Run run) {
         ServerLevel l = level();
@@ -774,7 +800,7 @@ public final class AncientCity {
         for (UUID id : run.crew) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
             if (p == null || !Islands.isIsland(p.level())) {
-                refund(id, run.diff, run.paidCc.contains(id));
+                if (!run.test) refund(id, run.diff, run.paidCc.contains(id));
                 continue;
             }
             p.teleportTo(l, at[0], at[1], at[2], Set.of(), (float) at[3], 0f, true);
@@ -843,9 +869,11 @@ public final class AncientCity {
     /** Adds noise (raw points; the difficulty multiplier is applied here). src may be null; at = where (or null). */
     static void noise(Run run, ServerPlayer src, double raw, BlockPos at) {
         if (run.over || run.building || raw <= 0) return;
+        if (src != null && src.isSpectator()) return; // 5.25: a crew member in spectator mode makes no noise
         double v = raw * NOISE_MULT[run.diff];
         run.noise += v;
         run.lastNoise = ticks;
+        run.nextDecay = ticks + DECAY_SECONDS * 20L; // 5.25: the first drop comes exactly DECAY_SECONDS after the last noise
         if (src != null) run.loud.merge(src.getUUID(), v, Double::sum);
         ServerLevel l = level();
         if (l != null && raw >= 5) CityWardens.heard(l, run, src, raw, at != null ? at : src == null ? null : src.blockPosition(), ticks);
@@ -972,6 +1000,7 @@ public final class AncientCity {
         ServerPlayer best = null;
         double bd = range * range;
         for (ServerPlayer p : inside(run)) {
+            if (p.isSpectator()) continue;
             double d = p.blockPosition().distSqr(at);
             if (d < bd) {
                 bd = d;
@@ -1120,12 +1149,12 @@ public final class AncientCity {
             p.getFoodData().setSaturation(0f);
             if (hasRelic(p)) p.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, 40, 0, false, false));
         }
-        // Decay: 1 point every 20 seconds of silence, never below a milestone already passed.
+        // Decay (5.25): 1% of the meter for every DECAY_SECONDS the whole crew stays silent, never below a milestone already passed.
         if (ticks >= run.nextDecay) {
             run.nextDecay = ticks + DECAY_SECONDS * 20L;
             if (ticks - run.lastNoise >= DECAY_SECONDS * 20L && run.milestone < MILESTONES.length) {
                 double floor = run.milestone == 0 ? 0 : run.cap * MILESTONES[run.milestone - 1] / 100.0;
-                run.noise = Math.max(floor, run.noise - 1);
+                run.noise = Math.max(floor, run.noise - run.cap / 100.0);
             }
         }
         // Darkness pulses (25%+), shriekers going off by themselves (75%+).
@@ -1145,7 +1174,7 @@ public final class AncientCity {
         if (run.relicTaken && ticks >= run.nextHeartbeat && l != null) {
             run.nextHeartbeat = ticks + HEARTBEAT_SECONDS[run.diff] * 20L;
             for (ServerPlayer p : inside(run))
-                if (hasRelic(p)) {
+                if (hasRelic(p) && !p.isSpectator()) {
                     l.playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.WARDEN_HEARTBEAT, SoundSource.PLAYERS, 1.2f, 1.4f);
                     noise(run, p, HEART, null);
                     CityWardens.heartbeat(l, run, p, ticks);
@@ -1460,6 +1489,15 @@ public final class AncientCity {
         run.escaped = true;
         int d = run.diff, pct = run.pct();
         int seconds = (int) ((ticks - run.startTick) / 20);
+        if (run.test) { // 5.25: a test escape pays nothing and counts for nothing (leaderboard, stamps, requests)
+            for (ServerPlayer m : inside(run)) {
+                removeRelics(m);
+                Lobby.msg(m, "§b§lTEST ESCAPE! §7(" + DIFF_NAMES[d] + ", " + CityMarket.time(seconds) + ", noise " + pct + "%) §8No rewards on a test trip.");
+            }
+            for (ServerPlayer m : inside(run)) if (!DOWNED.containsKey(m.getUUID())) extract(m, "§6[Captain Wren] §fTest over, captain.");
+            endRun(run, "test escape");
+            return;
+        }
         boolean silent = pct <= SILENT_PCT;
         for (ServerPlayer m : inside(run)) {
             if (DOWNED.containsKey(m.getUUID())) continue;

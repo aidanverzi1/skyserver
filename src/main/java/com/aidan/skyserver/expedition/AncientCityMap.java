@@ -17,7 +17,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import java.util.*;
 
 /**
- * 5.21: the Ancient City Expedition's map - a 125 x 125 deepslate MAZE (5.22; was 201 x 201), built fresh for every trip in its own
+ * 5.21: the Ancient City Expedition's map - a 101 x 101 deepslate MAZE (5.25; was 125 x 125, before that 201 x 201), built fresh for every trip in its own
  * world (skyserver:ancient_city, deep dark biome: nothing spawns there by itself).
  *
  * THREE FIXED MAPS rotate weekly (CityMarket.mapIndex(): map 1, 2, 3, 1... switching Thursday 00:00 Eastern).
@@ -32,23 +32,24 @@ import java.util.*;
  *    the vault room. The plug breaks to a Warden's sonic boom or a pickaxe (very loud).
  *  - The south wall: WREN'S LIFT, where the crew lands (safe inside). Once the relic is taken it jams: Wren drops
  *    a rope at one of the 3 ROPE SHAFTS instead (far corners / sides, 90+ blocks from the lift).
- *  - 14 house spots (7 x 7 rooms with one door), grey carpet along the main routes (gaps on purpose), sculk
+ *  - 12 house spots (7 x 7 rooms with one door), grey carpet along the main routes (gaps on purpose), sculk
  *    sensors near the gaps, shriekers, sculk patches, urns (decorated pots) in dead ends, soul lanterns.
  * Numbers by difficulty are in the arrays below (index 0 Easy .. 3 Nightmare).
  */
 final class AncientCityMap {
     private AncientCityMap() {}
 
-    static final int FLOOR_Y = 64, R = 62, HEIGHT = 7, DOME = 20, DOME_HEIGHT = 16;
+    static final int FLOOR_Y = 64, R = 50, HEIGHT = 7, DOME = 20, DOME_HEIGHT = 16;
     /** Grid: one cell every P blocks (3 air + 1 wall), N cells a side. */
-    static final int P = 4, N = 31;
-    /** Real houses / decoys per trip (the rest of the 14 spots are sealed). */
-    static final int[] HOUSES = {5, 6, 7, 8}, DECOYS = {3, 4, 5, 6};
-    static final int HOUSE_SPOTS = 14;
-    static final int[] SENSORS = {35, 45, 60, 80};
-    static final int[] SHRIEKERS = {6, 8, 10, 12};
-    static final int[] SCULK_PATCHES = {12, 16, 20, 24};
-    static final int[] URNS = {8, 10, 12, 14};
+    static final int P = 4, N = 25;
+    /** Real houses / decoys per trip (the rest of the 12 spots are sealed). */
+    static final int[] HOUSES = {4, 5, 6, 7}, DECOYS = {2, 3, 4, 5};
+    /** 5.25: 12 spots (was 14); spots are at least HOUSE_GAP cells apart (was 5 - only 9-10 fit the smaller city). */
+    static final int HOUSE_SPOTS = 12, HOUSE_GAP = 4, SMALL_PLAZAS = 6;
+    static final int[] SENSORS = {23, 29, 39, 52};
+    static final int[] SHRIEKERS = {4, 5, 7, 8};
+    static final int[] SCULK_PATCHES = {8, 10, 13, 16};
+    static final int[] URNS = {5, 7, 8, 9};
     /** Chance (%) a carpeted cell of a route has no carpet (you cross bare floor there). */
     static final int[] CARPET_GAPS = {15, 27, 40, 55};
     /** The three fixed map seeds. */
@@ -215,13 +216,13 @@ final class AncientCityMap {
             boolean ok = true;
             for (int a = -1; a <= 2 && ok; a++)
                 for (int c = -1; c <= 2 && ok; c++) if (!inGrid(i + a, j + c) || m.kind[i + a][j + c] != 0) ok = false;
-            for (int[] h : houseCells) if (Math.abs(h[0] - i) < 5 && Math.abs(h[1] - j) < 5) ok = false;
+            for (int[] h : houseCells) if (Math.abs(h[0] - i) < HOUSE_GAP && Math.abs(h[1] - j) < HOUSE_GAP) ok = false;
             if (!ok) continue;
             for (int a = 0; a < 2; a++) for (int c = 0; c < 2; c++) { m.kind[i + a][j + c] = 1; m.house[i + a][j + c] = houseCells.size(); }
             houseCells.add(new int[]{i, j});
         }
         // Small plazas.
-        for (int tries = 0, made = 0; tries < 2000 && made < 9; tries++) {
+        for (int tries = 0, made = 0; tries < 2000 && made < SMALL_PLAZAS; tries++) {
             int size = 2 + rng.nextInt(2), i = 1 + rng.nextInt(N - size - 1), j = 1 + rng.nextInt(N - size - 1);
             boolean ok = true;
             for (int a = -1; a <= size && ok; a++)

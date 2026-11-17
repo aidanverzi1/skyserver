@@ -99,6 +99,7 @@ public final class Quests {
     /** Something happened: counts toward today's quests with this key (and the battle pass's weekly challenges). */
     public static void progress(ServerPlayer p, String key, int amount) {
         if (p == null || p instanceof com.aidan.skyserver.bots.BotPlayer || amount <= 0) return;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(p.getUUID())) return; // 5.25: no quest progress on a test trip
         com.aidan.skyserver.Safe.run("pass event", () -> BattlePass.event(p, key, amount));
         if (key.equals("sw_win") || key.equals("gw_win") || key.equals("bw_win"))
             com.aidan.skyserver.Safe.run("victory effect", () -> Cosmetics.victory(p)); // 5.8

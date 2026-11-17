@@ -69,6 +69,7 @@ public final class Tokens {
 
     /** Adds (or with a negative amount, takes) tokens. Never goes below 0. */
     public static void add(UUID id, String token, int amount) {
+        if (amount > 0 && com.aidan.skyserver.expedition.ExpeditionTest.isTesting(id)) return; // 5.25: no rewards on a test trip
         load();
         Map<String, Integer> m = DATA.computeIfAbsent(id, k -> new LinkedHashMap<>());
         m.put(token, Math.max(0, m.getOrDefault(token, 0) + amount));

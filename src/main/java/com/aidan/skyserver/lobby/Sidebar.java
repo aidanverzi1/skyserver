@@ -91,7 +91,7 @@ public final class Sidebar {
         if (is == null) l.add("§fIsland: §7none §8/is");
         else {
             l.add("§fIsland: §bworth " + is.worth() + " §7" + is.size + "x" + is.size);
-            l.add("§fWren: " + com.aidan.skyserver.island.IslandQuests.progressShort(is));
+            l.add("§fWren: " + com.aidan.skyserver.island.IslandQuests.progressShort(id));
         }
         String f = Factions.factionOf(id);
         if (f != null) l.add("§fFaction: §c" + f);

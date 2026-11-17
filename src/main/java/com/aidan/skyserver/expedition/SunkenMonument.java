@@ -22,7 +22,9 @@ import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -57,6 +59,7 @@ import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -78,35 +81,49 @@ import java.util.*;
 
 /**
  * 5.20: the SUNKEN MONUMENT EXPEDITION - a flooded prismarine monument (SunkenMap), paid in farm items.
+ * 5.25 rework: the whole monument stays FLOODED for the whole trip. Air is the challenge, not draining.
  *
  * HOW A TRIP GOES
  *  - Talk to Captain Wren in his ship room -> Sunken Monument, pick a difficulty. The fare is ITEMS, put in
- *    the room's Tribute Chests (see Tribute): 64 / 128 / 192 / 256 each of iron, copper, coal, redstone,
- *    cooked chicken, wool, seeds, wheat and carrots, plus dried kelp blocks, pumpkins and sugar cane
- *    (and 16 diamonds on Nightmare). Up to 3 (island and faction mates) sail; everyone puts their own fare in
- *    the HOST's chests, and gets their own loot and rewards. Wren takes the items when the crew leaves.
- *  - Land in WREN'S DOCK (dry). Wren gives Water Breathing for the first minute only - bring your own after.
- *    Then the crew opens the FLOODGATES one wing at a time, in the order they choose (the first wing's chests
- *    each give a bonus roll).
- *  - Each ROOM starts flooded: walk in and its guards come (guardians and drowned, two waves). Every player
- *    gets 2 sponges in each room (they disappear when you leave). RISING TIDE: right-click the pump to drain
- *    some water; the water keeps rising, faster with more players and with every LEAK - a surge opens one
- *    every so often: crouch next to it for 3 seconds to plug it. Beat the guards and the room drains and the
- *    chest opens (each player loots it once).
+ *    the room's Tribute Chests (see Tribute; Easy 64 of each, harder fares scaled to the cash). Up to 3 (island
+ *    and faction mates) sail; everyone puts their own fare in the HOST's chests, and gets their own loot and
+ *    rewards. Wren takes the items when the crew leaves.
+ *  - Land in WREN'S DOCK (nothing can hit you there, but you can still drown). Wren gives Water Breathing for the
+ *    first minute. After that Water Breathing (potions, turtle shells) and Conduit Power are taken away -
+ *    Respiration still works. No buckets, sponges, doors, beds, conduits, soul sand or magma (air pockets).
+ *  - AIR: AIR VENTS (bubble coral blocks) in the hub, every corridor and every room: swim into one for a full
+ *    breath (5.25b: VENT_AIR, a bit over half a breath). Each vent has VENT_PUFFS puffs per crew member and gets one
+ *    back every VENT_RECHARGE_SECONDS. Respiration counts a little less here (RESP_FACTOR).
+ *    PRESSURE: air goes faster deep down (the Guardian Pit and the vault x1.5, the Deep Passage x2).
+ *    BUDDY BREATH: crewmates within BUDDY_RANGE blocks even out their air.
+ *  - The three WINGS are open from the start: swim into one (the first wing you enter gives its chests a bonus roll).
+ *  - Each ROOM starts when you swim in: its guards come (two waves) and its TIDE SEALS (redstone lamps in the
+ *    walls) flash an order (3 / 4 / 5 / 6 long). Touch them in that order (swim right up to them). Every right
+ *    seal gives a breath of air (SEAL BREATH), the last one a full breath. A wrong one resets the order and calls
+ *    one more guard. Touch the TIDE CRYSTAL (amethyst, middle of the floor) to see the order again. During an
+ *    INK BLACKOUT the order flashes by itself (INK REVEALS). Seals done + guards beaten = room cleared: take your
+ *    own loot out of the chest (like the Nether), and touch one of the two BOON SHELLS for a perk for the trip.
+ *  - One room has the SUNKEN IDOL on a raw gold pedestal: heavy (slow, air goes x1.5 faster). Bring it to the
+ *    vault when the Tidemother falls: +20% clear cash for everyone.
+ *  - THE TIDE CHART: one twist a week (Thursday turnover): Strong Currents, Dark Water, Thin Air, Restless Guards,
+ *    Calm Seas.
  *  - RIPTIDE CURRENTS: the tube above each wing's corridor sweeps you back to the hub - unless it's a trap
  *    current (random, per current), which dumps you in the Guardian Pit under the hub.
  *  - THE SUNKEN BELL tolls every 2 minutes: 10 seconds of enraged guards (a chime warns you 3 seconds early).
- *    INK BLACKOUT: every 45 seconds, 5 seconds of darkness outside the dock and drained rooms.
+ *    INK BLACKOUT: every 45 seconds, 5 seconds of darkness outside the dock.
  *  - All three wings done: the VAULT GATE opens. Down the shaft waits WREN'S DIVING BELL: push it (stand
- *    behind it) along the Deep Passage. Near it you can breathe. Guards attack it; it's very hard to sink.
- *    At the end, the TIDEMOTHER (an Elder Guardian) rises. Her charged beam hits everyone she can see -
- *    hide behind the vault's pillars. No Mining Fatigue on this trip.
- *  - Beat her: CASH on a clear (5x the fare's shop value on Easy up to 7x on Nightmare; each player's first 2
- *    clears a day pay full, later ones half), keys, shards, pass XP, a Wren's Charts stamp. If the bell is
- *    still afloat, the VAULT too: heart of the sea, Tide trim, conduits (Hard+), real sponges.
+ *    behind it) along the Deep Passage. It is the ONLY air down there: within BELL_BREATH_RANGE of it you breathe
+ *    from its tank, which empties as you do. The three AIR PODS on the passage floor refill the tank - once their
+ *    guards are beaten. Nobody pushing = the current drags the bell back. Guards attack it.
+ *    At the end, the TIDEMOTHER (an Elder Guardian) rises (the bell's tank is topped up, and two vault vents open).
+ *    Her charged beam hits everyone she can see - hide behind the vault's pillars. Her helpers: at most
+ *    HELPER_CAP alive (+1 per extra player). No Mining Fatigue on this trip.
+ *  - Beat her: CASH on a clear ($7,500 / $15,000 / $25,000 / $45,000; each player's first 2 clears a day pay
+ *    full, later ones half), keys, shards, pass XP, a Wren's Charts stamp. If the bell is still afloat, the VAULT
+ *    too: heart of the sea, Tide trim, conduits (Hard+), real sponges.
  *  - Drowned killed by a player drop a trident 0.1% of the time.
  *  - Dying drops what you carry where you fell (Recovery Charm saves it). Downed first if a teammate can pick
- *    you up (once per team) or you can pay the revive (once per player). No buckets, no player-vs-player.
+ *    you up (once per team) or you can pay the revive (once per player). No player-vs-player.
  */
 public final class SunkenMonument {
     private SunkenMonument() {}
@@ -116,8 +133,8 @@ public final class SunkenMonument {
     public static final String[] DIFF_COLORS = {"§a", "§e", "§c", "§4"};
 
     // ---- Every number (index 0 Easy .. 3 Nightmare) ----
-    /** Cash on a clear: the fare's shop value x5 (Easy) .. x7 (Nightmare). */
-    static final long[] CASH = {5_000, 11_500, 19_000, 35_000};
+    /** Cash on a clear (5.25: +50% on Easy; the fares of the others scale with these - Tribute.FARE_SCALE). */
+    static final long[] CASH = {7_500, 15_000, 25_000, 45_000};
     /** Each player's first FULL_CLEARS clears a day pay the full cash, later ones CASH_LATER of it. */
     static final int FULL_CLEARS = 2;
     static final double CASH_LATER = 0.5;
@@ -130,16 +147,73 @@ public final class SunkenMonument {
     static final int WAVE_SECONDS = 45;
     static final double[] HEALTH = {0.2, 0.4, 0.75, 1.3}, DAMAGE = {0.1, 0.3, 0.6, 1.0};
     static final double CREW_HEALTH = 0.70, CREW_DAMAGE = 0.10;
-    /** Rising Tide: layers a second for one player (x1.5 per extra player), +50% per open leak. A pump click drains PUMP layers. */
-    static final double[] FLOOD = {0.05, 0.06, 0.075, 0.09};
-    static final double CREW_FLOOD = 0.5, LEAK_FLOOD = 0.5, PUMP = 0.15;
-    static final int PUMP_COOLDOWN = 10, LEAK_SECONDS = 25, MAX_LEAKS = 3, PLUG_TICKS = 60;
-    /** Water Breathing from Wren at the start (first room only). */
+    /** Water Breathing from Wren at the start (the first minute only). */
     static final int START_BREATH_TICKS = 60 * 20;
     static final int BELL_TOLL_SECONDS = 120, BELL_RAGE_SECONDS = 10, INK_EVERY = 45, INK_SECONDS = 5;
-    /** The diving bell: health (x1.25 per extra player), push speed (blocks a second per pusher, up to 3 count). */
-    static final int BELL_HP = 600;
-    static final double BELL_PUSH = 0.6;
+
+    // ---- 5.25: air ----
+    /**
+     * Puffs per vent per crew member, by difficulty (one fewer on a Thin Air week, never below 1); one comes back every
+     * VENT_RECHARGE_SECONDS. 5.25b: a puff is HALF A BREATH-ish (VENT_AIR of the 300 air a full breath holds).
+     *
+     * THE MATH (solo, one room; fights take roughly Easy 80 s, Normal 100 s, Hard 120 s, Nightmare 150 s):
+     *  a puff lasts 9 s with no Respiration, 15 s with I, 21 s with II, 27 s with III (RESP_FACTOR below).
+     *  Puffs you can get in a room = room vents x (starting puffs + fight time / 20 s):
+     *    Easy   2 vents x (4 + 4)   = 16 puffs -> no Respiration 144 s  (fine)
+     *    Normal 2 vents x (3 + 5)   = 16 puffs -> no Respiration 144 s, I 240 s (no Respiration = tight)
+     *    Hard   1 vent  x (3 + 6)   =  9 puffs -> none 81 s (too short), I 135 s (tight), II 189 s
+     *    Nightmare 1 vent x (2 + 7.5) = 9.5 puffs -> none 85 s, I 142 s (too short), II 200 s, III 256 s
+     *  ...plus the breath you walk in with, Seal Breath, and crewmates (each diver adds their own puffs).
+     *  So: Easy and Normal work with no Respiration, Hard wants I-II, Nightmare wants II-III.
+     */
+    static final int[] VENT_PUFFS = {4, 3, 3, 2};
+    static final int VENT_RECHARGE_SECONDS = 20, CALM_RECHARGE_SECONDS = 12, PUFF_COOLDOWN_TICKS = 40, VENT_AIR = 180;
+    /**
+     * 5.25b: Respiration counts a bit less down here. Vanilla: I / II / III = 30 / 45 / 60 s from a full breath. In the
+     * monument air goes RESP_FACTOR times faster on top of that, so it's 25 / 35 / 45 s (+10 s a level instead of +15).
+     */
+    static final double[] RESP_FACTOR = {1.0, 30.0 / 25, 45.0 / 35, 60.0 / 45};
+    static final double VENT_RANGE = 1.8;
+    /** Seal Breath: air for every right seal, and for everyone in the room when the last one is set (5.25b: smaller). */
+    static final int SEAL_AIR = 40, SEAL_LAST_AIR = 120;
+    /** Tide Seals in a room's order, by difficulty. */
+    static final int[] SEALS = {3, 4, 5, 6};
+    static final double SEAL_RANGE = 1.8, CRYSTAL_RANGE = 1.8, SHELL_RANGE = 1.8;
+    /** Pressure: how much faster air goes in the deep parts, carrying the idol, and with Deep Lungs. */
+    static final double PIT_PRESSURE = 1.5, PASSAGE_PRESSURE = 2.0, VAULT_PRESSURE = 1.5, IDOL_PRESSURE = 1.5, DEEP_LUNGS = 0.75;
+    /** Buddy Breath: crewmates this close even out their air, up to BUDDY_STEP air a half second. */
+    static final double BUDDY_RANGE = 2.0;
+    static final int BUDDY_STEP = 20;
+    /** The Sunken Idol: +20% clear cash if someone has it in the vault when the Tidemother falls. */
+    static final double IDOL_BONUS = 0.20;
+    static final String IDOL_TAG = "sunken_idol";
+
+    // ---- 5.25: boons (one from the two shells of every cleared room, for the whole trip) ----
+    static final int SWIFT_FINS = 0, DEEP_LUNGS_BOON = 1, STEADY_HANDS = 2, TOUGH_SCALES = 3, BRIGHT_EYES = 4;
+    static final String[] BOON_NAMES = {"Swift Fins", "Deep Lungs", "Steady Hands", "Tough Scales", "Bright Eyes"};
+    static final String[] BOON_TIPS = {"you swim faster (Dolphin's Grace)", "your air lasts 25% longer", "one wrong seal per room is forgiven",
+            "you take less damage (Resistance I)", "Ink Blackouts last half as long for you"};
+    static final String[] BOON_BLOCKS = {"tube_coral_block", "brain_coral_block", "horn_coral_block", "fire_coral_block", "pearlescent_froglight"};
+
+    // ---- 5.25: the Tide Chart (one twist a week, Thursday turnover) ----
+    static final int STRONG_CURRENTS = 0, DARK_WATER = 1, THIN_AIR = 2, RESTLESS_GUARDS = 3, CALM_SEAS = 4;
+    static final String[] TIDE_NAMES = {"Strong Currents", "Dark Water", "Thin Air", "Restless Guards", "Calm Seas"};
+    static final String[] TIDE_TIPS = {"currents rush 50% faster and drag the bell back harder", "Ink Blackouts last 8 seconds", "air vents hold one puff fewer per diver",
+            "the Sunken Bell tolls every 80 seconds", "a gentle week: vents refill faster, Ink Blackouts last 3 seconds"};
+
+    /** This week's Tide Chart twist. */
+    static int tide() {
+        return Math.floorMod(CityMarket.week(), TIDE_NAMES.length);
+    }
+
+    /** The diving bell: health (x1.25 per extra player), push speed (blocks a second per pusher, up to 3 count), drift back. */
+    static final int BELL_HP = 300;
+    static final double BELL_PUSH = 0.6, BELL_DRIFT = 0.3;
+    /** The bell's air tank (per player in the crew), what an air pod puts back (per player), and how close you breathe from it. */
+    static final int BELL_AIR_PER_PLAYER = 1200, POD_AIR_PER_PLAYER = 600;
+    static final double BELL_BREATH_RANGE = 4.0;
+    /** The Tidemother's helpers alive at once: HELPER_CAP + 1 per extra player. */
+    static final int HELPER_CAP = 2;
     /** The Tidemother: health (x1.75 with 2, x2.3 with 3), beam damage, seconds between beams / helpers. */
     static final double[] BOSS_HP = {300, 450, 650, 900};
     static final double[] BOSS_CREW = {1.0, 1.75, 2.3};
@@ -163,35 +237,53 @@ public final class SunkenMonument {
         final Set<UUID> inside = new LinkedHashSet<>();
         final Set<UUID> revived = new HashSet<>();
         final Set<Long> placed = new HashSet<>();
-        final Map<Long, Boolean> sponges = new HashMap<>(); // placed sponge -> was it ours (tagged)
         final Map<UUID, Map<String, Integer>> fares = new HashMap<>();
         /** 5.24c: crew who came on a free ticket. */
         final Set<UUID> ticket = new HashSet<>();
-        final Map<UUID, Long> pumpUsed = new HashMap<>();
-        final Map<UUID, Integer> plugging = new HashMap<>();
         SunkenMap.Layout layout;
         boolean building = true, over = false, teamReviveUsed = false, won = false;
         long startTick;
         int timeLimit, warned = 0, crewSize = 1;
         UUID wren, boss;
-        /** -1 = waiting for the crew to choose; otherwise the open wing. */
-        int openWing = -1, firstWing = -1;
+        /** The first wing anyone swam into (its chests give a bonus roll), -1 = none yet. */
+        int firstWing = -1;
         final boolean[] wingDone = new boolean[3];
         boolean vaultOpen = false, bossUp = false, bellLost = false;
         int bellU = SunkenMap.BELL_START;
         double bellProgress = 0, bellHp, bellMax;
         final List<BlockPos> bellBlocks = new ArrayList<>();
-        long nextToll, nextInk, rageUntil = 0, nextBeam = 0, beamAt = -1, nextHelpers = 0, nextPassageGuards = 0;
+        long nextToll, nextInk, inkUntil = 0, rageUntil = 0, nextBeam = 0, beamAt = -1, nextHelpers = 0, nextPassageGuards = 0;
         ServerBossEvent bar;
-        /** 5.21: an op's test trip (/sunken admin test): no fare, no rewards, test commands work. testCrew = crew size it pretends to have. */
+        /** 5.21: an op's test trip (5.25: started with /ss test): no fare, no rewards, the test commands work. */
         boolean test = false, god = false;
-        int testCrew = 1;
+        // ---- 5.25: air ----
+        /** Every working vent: position -> {puffs left, most puffs}. */
+        final Map<Long, int[]> vents = new HashMap<>();
+        long nextVentRecharge;
+        final Map<UUID, Integer> lastAir = new HashMap<>();
+        final Map<UUID, Double> airDebt = new HashMap<>();
+        final Map<UUID, Long> puffReady = new HashMap<>();
+        double bellAir, bellAirMax;
+        final boolean[] podSpawned = new boolean[3], podUsed = new boolean[3];
+        final List<Set<UUID>> podGuards = List.of(new HashSet<>(), new HashSet<>(), new HashSet<>());
+        final Set<UUID> helpers = new HashSet<>();
+        // ---- 5.25: seals, boons, the idol, the Tide Chart ----
+        final Map<UUID, Integer> lastSeal = new HashMap<>();
+        final Map<UUID, Set<Integer>> boons = new HashMap<>();
+        boolean idolTaken = false;
+        int tide;
 
         Run(int id, int diff, int islandId, UUID leader) {
             this.id = id;
             this.diff = diff;
             this.islandId = islandId;
             this.leader = leader;
+            this.tide = tide();
+        }
+
+        boolean boon(UUID id, int b) {
+            Set<Integer> s = boons.get(id);
+            return s != null && s.contains(b);
         }
     }
 
@@ -244,6 +336,11 @@ public final class SunkenMonument {
     static Run runOf(UUID id) {
         for (Run r : RUNS) if (r.inside.contains(id)) return r;
         return null;
+    }
+
+    static boolean onTrip(UUID id) {
+        for (Run r : RUNS) if (!r.over && r.crew.contains(id)) return true;
+        return false;
     }
 
     private static Muster musterOf(UUID id) {
@@ -304,7 +401,8 @@ public final class SunkenMonument {
                 if (source.getEntity() instanceof Player) return false; // no player-vs-player
                 Run run = runOf(p.getUUID());
                 if (run != null && run.test && run.god) return false; // 5.21: test trip god mode
-                return run == null || run.layout == null || !run.layout.inDock(p.getX(), p.getY(), p.getZ()); // the dock is safe
+                // The dock is safe from everything that HITS you - 5.25: but you can still drown there (it's flooded too).
+                return run == null || run.layout == null || source.getEntity() == null || !run.layout.inDock(p.getX(), p.getY(), p.getZ());
             }
             return true;
         });
@@ -314,15 +412,7 @@ public final class SunkenMonument {
             if (run == null || run.layout == null || sp.isCreative()) return InteractionResult.PASS;
             BlockPos pos = hit.getBlockPos();
             boolean main = hand == net.minecraft.world.InteractionHand.MAIN_HAND;
-            if (pos.equals(run.layout.dryer)) {
-                if (main) Safe.run("sunken dryer", () -> drySponges(sp));
-                return InteractionResult.SUCCESS;
-            }
             for (SunkenMap.Room r : run.layout.rooms) {
-                if (pos.equals(r.pump)) {
-                    if (main) Safe.run("sunken pump", () -> pump(sp, run, r));
-                    return InteractionResult.SUCCESS;
-                }
                 if (pos.equals(r.chest)) {
                     if (main) Safe.run("sunken chest", () -> openChest(sp, run, r));
                     return InteractionResult.SUCCESS;
@@ -330,19 +420,20 @@ public final class SunkenMonument {
             }
             ItemStack held = player.getItemInHand(hand);
             if (held.getItem() instanceof BucketItem) {
-                tip(sp, "§cNo buckets in the Sunken Monument - use the pumps and sponges.");
+                tip(sp, "§cNo buckets in the Sunken Monument.");
                 return InteractionResult.FAIL;
             }
             if (held.getItem() instanceof BlockItem) {
+                // 5.25: nothing that makes an air pocket (or a bubble column, or Conduit Power).
+                if (airMaker(held)) {
+                    tip(sp, "§cThat would make an air pocket - not in the Sunken Monument.");
+                    return InteractionResult.FAIL;
+                }
                 BlockPos target = level.getBlockState(pos).canBeReplaced() ? pos : pos.relative(hit.getDirection());
                 if (run.layout.isMapBlock(target) || run.bellBlocks.contains(target)) return InteractionResult.FAIL;
-                boolean sponge = held.is(Items.SPONGE) || held.is(Items.WET_SPONGE);
-                boolean ours = Stacks.is(held, SPONGE_TAG);
                 Lobby.runLaterTicks(1, () -> Safe.run("sunken place", () -> {
                     if (run.over) return;
-                    BlockState now = level.getBlockState(target);
-                    if (sponge && (now.is(Blocks.SPONGE) || now.is(Blocks.WET_SPONGE))) run.sponges.put(target.asLong(), ours);
-                    else if (!now.canBeReplaced()) run.placed.add(target.asLong());
+                    if (!level.getBlockState(target).canBeReplaced()) run.placed.add(target.asLong());
                 }));
             }
             return InteractionResult.PASS;
@@ -350,7 +441,7 @@ public final class SunkenMonument {
         UseItemCallback.EVENT.register((player, level, hand) -> {
             if (level.isClientSide() || !isSunken(level)) return InteractionResult.PASS;
             if (player.getItemInHand(hand).getItem() instanceof BucketItem && player instanceof ServerPlayer sp && !sp.isCreative()) {
-                tip(sp, "§cNo buckets in the Sunken Monument - use the pumps and sponges.");
+                tip(sp, "§cNo buckets in the Sunken Monument.");
                 return InteractionResult.FAIL;
             }
             return InteractionResult.PASS;
@@ -366,15 +457,13 @@ public final class SunkenMonument {
             if (!isSunken(level) || !(player instanceof ServerPlayer sp) || sp.isCreative()) return true;
             Run run = runOf(sp.getUUID());
             if (run == null || run.layout == null) return true;
-            Boolean ours = run.sponges.remove(pos.asLong());
-            if (ours != null) {
-                // A placed sponge comes back as it went in (tagged sponges stay tagged).
-                ItemStack back = new ItemStack(state.is(Blocks.WET_SPONGE) ? Items.WET_SPONGE : Items.SPONGE);
-                level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                EndRewards.give(sp, ours ? sponge(back) : back);
-                return false;
+            if (run.placed.remove(pos.asLong())) {
+                // 5.25: what you placed comes back, and the spot fills with water (no air pockets).
+                Lobby.runLaterTicks(1, () -> {
+                    if (level.getBlockState(pos).isAir()) level.setBlock(pos, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+                });
+                return true;
             }
-            if (run.placed.remove(pos.asLong())) return true;
             if (run.layout.isMapBlock(pos) || run.bellBlocks.contains(pos)) {
                 tip(sp, "§7The monument's stone has stood for ages - it won't break.");
                 return false;
@@ -390,19 +479,12 @@ public final class SunkenMonument {
                         .executes(c -> { call(c.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(c, "difficulty")); return 1; })))
                 .then(Commands.literal("join").executes(c -> { join(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("go").executes(c -> { goNow(c.getSource().getPlayerOrException()); return 1; }))
-                .then(Commands.literal("gate").then(Commands.argument("wing", IntegerArgumentType.integer(0, 2))
-                        .executes(c -> { openGate(c.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(c, "wing")); return 1; })))
                 .then(Commands.literal("home").executes(c -> { goHome(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("revive").executes(c -> { revive(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("giveup").executes(c -> { giveUp(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("help").executes(c -> { help(c.getSource().getPlayerOrException()); return 1; }))
                 .then(Commands.literal("admin").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                        // 5.21: op test mode.
-                        .then(Commands.literal("test").then(Commands.argument("difficulty", IntegerArgumentType.integer(0, 3))
-                                .executes(c -> { startTest(c.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(c, "difficulty"), 1); return 1; })
-                                .then(Commands.argument("crew", IntegerArgumentType.integer(1, CREW_MAX))
-                                        .executes(c -> { startTest(c.getSource().getPlayerOrException(), IntegerArgumentType.getInteger(c, "difficulty"),
-                                                IntegerArgumentType.getInteger(c, "crew")); return 1; }))))
+                        // Op test tools (a test trip itself starts with /ss test sunken <difficulty> [players]).
                         .then(Commands.literal("skip").executes(c -> { testSkip(c.getSource().getPlayerOrException(), false); return 1; }))
                         .then(Commands.literal("wing").executes(c -> { testSkip(c.getSource().getPlayerOrException(), true); return 1; }))
                         .then(Commands.literal("vault").executes(c -> { testVault(c.getSource().getPlayerOrException(), false); return 1; }))
@@ -441,7 +523,8 @@ public final class SunkenMonument {
         Run mine = runOf(p.getUUID());
         String state = mine != null ? "§eYou're in the Sunken Monument" : MUSTERS.size() + RUNS.size() >= MAX_RUNS ? "§cWren's diving crew is busy - try soon" : "§eClick to choose a difficulty";
         return Stacks.named(new ItemStack(Items.PRISMARINE_BRICKS), "§b§lSunken Monument Expedition",
-                "§7Drain flooded rooms, beat their guards,", "§7then push Wren's diving bell to the vault", "§7and the §lTidemother§7.",
+                "§7Flooded halls - mind your air! Set the", "§7Tide Seals, beat the guards, then push", "§7Wren's diving bell to the §lTidemother§7.",
+                "§7This week's tide: §b" + TIDE_NAMES[tide()] + " §8(" + TIDE_TIPS[tide()] + ")",
                 "§7Fare: §ffarm items §7in the Tribute Chests", "§8(iron, copper, coal, redstone, chicken, wool...)",
                 "§7Cash on a clear: " + DIFF_COLORS[0] + k(CASH[0]) + " " + DIFF_COLORS[1] + k(CASH[1]) + " " + DIFF_COLORS[2] + k(CASH[2]) + " " + DIFF_COLORS[3] + k(CASH[3]),
                 "§7Up to " + CREW_MAX + " sail (island or faction mates).", "§c§lDying loses everything you carry!", state);
@@ -713,20 +796,25 @@ public final class SunkenMonument {
             return;
         }
         run.crewSize = Math.max(1, Math.min(CREW_MAX, run.inside.size()));
-        if (run.test) {
-            run.crewSize = run.testCrew;
-            for (ServerPlayer p : inside(run)) testHelp(p);
-        }
+        // 5.25: the air vents (puffs per crew member) and the rooms' seal orders.
+        int puffs = ventPuffs(run);
+        List<BlockPos> all = new ArrayList<>(run.layout.vents);
+        for (SunkenMap.Room r : run.layout.rooms) all.addAll(r.vents);
+        for (BlockPos vp : all) run.vents.put(vp.asLong(), new int[]{puffs, puffs});
+        run.nextVentRecharge = ticks + ventRecharge(run) * 20L;
+        if (run.test) for (ServerPlayer p : inside(run)) testHelp(p);
         for (ServerPlayer p : inside(run)) help(p);
-        offerGates(run);
         Skyserver.LOGGER.info("[Sunken] trip #{} started with {} player(s)", run.id, run.inside.size());
     }
 
     static void help(ServerPlayer p) {
-        Lobby.msg(p, "§b§lSUNKEN MONUMENT §7- open the §ffloodgates §7one wing at a time (ask Wren), drain and clear every room, then push §6Wren's diving bell §7to the vault and beat the §lTidemother§7.");
-        Lobby.msg(p, "§7§lRising Tide: §7right-click a room's §fpump §7(sticky piston) to drain some water. Surges open §fleaks§7: crouch next to one for 3 seconds to plug it. You get §f2 sponges §7in each room.");
-        Lobby.msg(p, "§7§lCurrents §7above each corridor rush you back to the hub (some are traps). The §lSunken Bell §7enrages the guards every 2 minutes; §lInk Blackouts §7blind you for 5 seconds every 45.");
-        Lobby.msg(p, "§7Wren's Water Breathing only lasts the first minute - bring potions, a turtle shell or Respiration. Near the diving bell you can breathe. §c§lDying loses everything you carry §7(a §bRecovery Charm §7saves it).");
+        Lobby.msg(p, "§b§lSUNKEN MONUMENT §7- everything is flooded. Swim into any wing; in every room set the §fTide Seals §7and beat the guards, then push §6Wren's diving bell §7to the vault and beat the §lTidemother§7.");
+        Lobby.msg(p, "§7§lAir: §7swim into an §dair vent §7(bubble coral) for a big gulp of air - each has a few puffs that slowly come back. Respiration helps, a bit less than usual. Deeper water eats your air faster. Stay close to a crewmate to share air.");
+        Lobby.msg(p, "§7§lTide Seals: §7the lamps in a room's walls flash an order - swim up to them in that order (each right one gives you a little air). Wrong = start again + one more guard. Touch the §damethyst crystal §7to see the order again.");
+        Lobby.msg(p, "§7Cleared rooms: take your loot out of the chest, and touch one of the two §bboon shells§7. One room hides the §6Sunken Idol §7- carry it to the vault for +20% cash (it's heavy).");
+        Lobby.msg(p, "§7Wren's Water Breathing lasts the first minute only - after that potions and turtle shells don't work here (Respiration does). In the Deep Passage the §6diving bell §7is your only air. §c§lDying loses everything you carry §7(a §bRecovery Charm §7saves it).");
+        int t = tide();
+        Lobby.msg(p, "§3This week's tide: §b§l" + TIDE_NAMES[t] + " §7- " + TIDE_TIPS[t] + ".");
     }
 
     static void status(ServerPlayer p) {
@@ -741,66 +829,40 @@ public final class SunkenMonument {
         int done = 0, total = run.layout.rooms.size();
         for (SunkenMap.Room r : run.layout.rooms) if (r.cleared) done++;
         Lobby.msg(p, "§b" + DIFF_NAMES[run.diff] + " Sunken Monument §7- rooms " + done + "/" + total + (run.vaultOpen ? ", §6the vault gate is open" : "")
-                + " §7(" + (left / 60) + ":" + String.format("%02d", left % 60) + " left)");
+                + " §7(" + (left / 60) + ":" + String.format("%02d", left % 60) + " left) §8| §3tide: " + TIDE_NAMES[run.tide]);
     }
 
+    /** 5.25: right-clicking Wren in the dock opens a small menu (go home / stay) instead of a chat button. */
     static void talk(ServerPlayer p) {
         Run run = runOf(p.getUUID());
         if (run == null) return;
-        if (run.openWing < 0 && !run.vaultOpen) {
-            offerGates(run, p);
-            return;
-        }
-        p.sendSystemMessage(Component.literal("§6[Captain Wren] §f" + (run.vaultOpen ? "The vault gate's open - down the shaft, push my bell! " : "Clear the " + SunkenMap.WING_SHORT[run.openWing] + " wing, captain. ") + "§7")
-                .append(Expedition.button("§c[Go home now - keep what you carry, no reward]", "/sunken home", "Leave the monument early")));
+        LockedMenu.open(p, "§8Captain Wren", 3, (id, inv, box, v) -> new HomeMenu(id, inv, box, v));
     }
 
-    // =====================================================================
-    // Floodgates
-    // =====================================================================
+    static final class HomeMenu extends LockedMenu {
+        private static final int HOME = 11, INFO = 13, STAY = 15;
 
-    private static void offerGates(Run run) {
-        for (ServerPlayer p : inside(run)) offerGates(run, p);
-    }
+        HomeMenu(int id, Inventory inv, SimpleContainer box, ServerPlayer viewer) {
+            super(id, inv, box, 3, viewer);
+            Run run = runOf(viewer.getUUID());
+            int done = 0, total = run == null ? 0 : run.layout.rooms.size();
+            if (run != null) for (SunkenMap.Room r : run.layout.rooms) if (r.cleared) done++;
+            box.setItem(HOME, Stacks.named(new ItemStack(Items.OAK_BOAT), "§c§lGo home now", "§7Keep everything you carry,", "§7but no clear reward."));
+            box.setItem(INFO, Stacks.named(new ItemStack(Items.MAP), "§b§lHow we're doing", "§7Rooms cleared: §f" + done + "/" + total,
+                    run != null && run.vaultOpen ? "§6The vault gate is open - push my bell!" : "§7Clear every room in all three wings.",
+                    run == null ? "" : "§3Tide: §b" + TIDE_NAMES[run.tide]));
+            box.setItem(STAY, Stacks.named(new ItemStack(Items.PRISMARINE_SHARD), "§a§lKeep diving", "§7Back to it, captain!"));
+            frame(Stacks.named(new ItemStack(Items.STAINED_GLASS_PANE.pick(DyeColor.CYAN)), " "));
+            broadcastChanges();
+        }
 
-    private static void offerGates(Run run, ServerPlayer p) {
-        MutableComponent line = Component.literal("§6[Captain Wren] §fWhich floodgate first, captain? §7");
-        boolean any = false;
-        for (int w = 0; w < 3; w++) {
-            if (run.wingDone[w]) continue;
-            any = true;
-            String tip = SunkenMap.WING_NAMES[w] + " - " + run.layout.wingRooms(w).size() + " room(s). " + (w == 0 ? "More guardians; prismarine and sea lanterns."
-                    : w == 1 ? "More drowned; nautilus shells." : "Guardians and drowned; more enchanted books.")
-                    + (run.firstWing < 0 ? " The first wing's chests give a bonus roll." : "");
-            line.append(Expedition.button("§b[" + SunkenMap.WING_SHORT[w] + "]", "/sunken gate " + w, tip)).append(Component.literal(" "));
+        @Override
+        protected void onClick(int slot, int button, boolean shift) {
+            if (slot == HOME) {
+                viewer.closeContainer();
+                Lobby.later(viewer, () -> goHome(viewer));
+            } else if (slot == STAY) viewer.closeContainer();
         }
-        if (any) p.sendSystemMessage(line);
-    }
-
-    static void openGate(ServerPlayer p, int wing) {
-        Run run = runOf(p.getUUID());
-        if (run == null || run.layout == null || run.building) {
-            Lobby.msg(p, "§7You're not in the Sunken Monument.");
-            return;
-        }
-        if (run.openWing >= 0) {
-            Lobby.msg(p, "§7Finish the " + SunkenMap.WING_SHORT[run.openWing] + " wing first.");
-            return;
-        }
-        if (run.wingDone[wing]) {
-            Lobby.msg(p, "§7That wing is already cleared.");
-            return;
-        }
-        run.openWing = wing;
-        if (run.firstWing < 0) run.firstWing = wing;
-        ServerLevel l = level();
-        for (BlockPos g : run.layout.gates.get(wing)) {
-            l.setBlock(g, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-            run.layout.blocks.remove(g.asLong());
-        }
-        BlockPos g0 = run.layout.gates.get(wing).get(0);
-        l.playSound(null, g0, SoundEvents.IRON_DOOR_OPEN, SoundSource.BLOCKS, 2f, 0.6f);
-        for (ServerPlayer m : inside(run)) Announce.title(m, "§b§lFLOODGATE OPEN", "§7" + SunkenMap.WING_NAMES[wing], 5, 50, 10);
     }
 
     // =====================================================================
@@ -819,8 +881,16 @@ public final class SunkenMonument {
                 continue;
             }
             if (run.over) continue;
+            ServerLevel l = level();
+            if (l == null) continue;
             currents(run);
-            plugging(run);
+            air(run);
+            seals(l, run);
+            if (ticks % 2 == 0) touches(l, run);
+            if (ticks % 10 == 0) {
+                buddyBreath(run);
+                ventSparkle(l, run);
+            }
             if (run.beamAt > 0 && ticks >= run.beamAt) beam(run);
         }
         tickDowned();
@@ -840,9 +910,29 @@ public final class SunkenMonument {
             run.warned = left <= 60 ? 2 : 1;
             for (ServerPlayer m : inside(run)) Lobby.msg(m, "§e§l" + (left <= 60 ? "1 MINUTE" : "5 MINUTES") + " LEFT! §7Wren hauls everyone up when time runs out (you keep what you carry).");
         }
-        // No Mining Fatigue on this trip (the Tidemother and guardians give it).
-        for (ServerPlayer p : inside(run)) if (p.hasEffect(MobEffects.MINING_FATIGUE)) p.removeEffect(MobEffects.MINING_FATIGUE);
+        boolean breathOver = ticks - run.startTick > START_BREATH_TICKS;
+        for (ServerPlayer p : inside(run)) {
+            // No Mining Fatigue on this trip (the Tidemother and guardians give it).
+            if (p.hasEffect(MobEffects.MINING_FATIGUE)) p.removeEffect(MobEffects.MINING_FATIGUE);
+            if (DOWNED.containsKey(p.getUUID())) continue;
+            // 5.25: after Wren's first minute, no Water Breathing (potions, turtle shells) and no Conduit Power.
+            if (breathOver) {
+                boolean had = p.hasEffect(MobEffects.WATER_BREATHING) || p.hasEffect(MobEffects.CONDUIT_POWER);
+                p.removeEffect(MobEffects.WATER_BREATHING);
+                p.removeEffect(MobEffects.CONDUIT_POWER);
+                if (had && ticks - run.startTick < START_BREATH_TICKS + 40) tip(p, "§3Wren's Water Breathing is gone - find the air vents!");
+                else if (had) tip(p, "§cWater Breathing doesn't work in the Sunken Monument.");
+            }
+            // Boons and the idol.
+            if (run.boon(p.getUUID(), SWIFT_FINS)) p.addEffect(new MobEffectInstance(MobEffects.DOLPHINS_GRACE, 40, 0, false, false));
+            if (run.boon(p.getUUID(), TOUGH_SCALES)) p.addEffect(new MobEffectInstance(MobEffects.RESISTANCE, 40, 0, false, false));
+            if (hasIdol(p)) p.addEffect(new MobEffectInstance(MobEffects.SLOWNESS, 40, 0, false, false));
+        }
         rooms(l, run);
+        if (ticks >= run.nextVentRecharge) {
+            run.nextVentRecharge = ticks + ventRecharge(run) * 20L;
+            for (int[] v : run.vents.values()) if (v[0] < v[1]) v[0]++;
+        }
         bellAndInk(l, run);
         if (run.vaultOpen && !run.bossUp) divingBell(l, run);
         if (run.bossUp) bossTick(l, run);
@@ -857,67 +947,336 @@ public final class SunkenMonument {
         if (ticks % 100 == 0) for (ServerPlayer m : inside(run)) {
             int done = 0;
             for (SunkenMap.Room r : run.layout.rooms) if (r.cleared) done++;
-            Announce.actionBar(m, "§bSunken Monument §8| §f" + (left / 60) + ":" + String.format("%02d", left % 60) + " §8| §7rooms " + done + "/" + run.layout.rooms.size());
+            if (inRoom(run, m) == null) Announce.actionBar(m, "§bSunken Monument §8| §f" + (left / 60) + ":" + String.format("%02d", left % 60) + " §8| §7rooms " + done + "/" + run.layout.rooms.size());
         }
     }
 
-    // ---- Rooms: waves, the Rising Tide, leaks ----
+    /** Puffs each vent starts with (and holds at most): per diver, by difficulty, one fewer per diver on a Thin Air week. */
+    private static int ventPuffs(Run run) {
+        return Math.max(1, VENT_PUFFS[run.diff] - (run.tide == THIN_AIR ? 1 : 0)) * run.crewSize;
+    }
+
+    private static Holder<Enchantment> respiration;
+
+    /** The Respiration level of the player's helmet (0-3). */
+    private static int respiration(ServerPlayer p) {
+        try {
+            if (respiration == null) respiration = p.level().registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.RESPIRATION);
+            ItemStack head = p.getItemBySlot(EquipmentSlot.HEAD);
+            return head.isEmpty() ? 0 : Math.min(3, head.getEnchantments().getLevel(respiration));
+        } catch (RuntimeException e) {
+            return 0;
+        }
+    }
+
+    private static int ventRecharge(Run run) {
+        return run.tide == CALM_SEAS ? CALM_RECHARGE_SECONDS : VENT_RECHARGE_SECONDS;
+    }
+
+    private static SunkenMap.Room inRoom(Run run, ServerPlayer p) {
+        for (SunkenMap.Room r : run.layout.rooms) if (r.inside(p.getX(), p.getY(), p.getZ(), 0)) return r;
+        return null;
+    }
+
+    private static boolean active(ServerPlayer p) {
+        return !DOWNED.containsKey(p.getUUID()) && !p.isSpectator() && !p.isCreative() && p.isAlive();
+    }
+
+    // ---- 5.25: air (pressure, the bell, buddy breath, vents) ----
+
+    /** Every tick: deep water eats air faster (and the idol, and Deep Lungs slows it); near the bell you breathe from its tank. */
+    private static void air(Run run) {
+        BlockPos bell = run.vaultOpen && !run.bellLost && run.bellBlocks.size() > 0 ? run.layout.bellPos(run.bellU) : null;
+        Vec3 bc = bell == null ? null : Vec3.atCenterOf(bell);
+        for (ServerPlayer p : inside(run)) {
+            UUID id = p.getUUID();
+            if (!active(p)) {
+                run.lastAir.remove(id);
+                continue;
+            }
+            int max = p.getMaxAirSupply(), air = p.getAirSupply();
+            if (bc != null && run.bellAir > 0 && p.distanceToSqr(bc) <= BELL_BREATH_RANGE * BELL_BREATH_RANGE) {
+                if (air < max) {
+                    run.bellAir = Math.max(0, run.bellAir - (max - air));
+                    p.setAirSupply(max);
+                    if (run.bellAir <= 0) for (ServerPlayer m : inside(run)) Announce.title(m, "", "§c§lThe bell's air is gone! §7Clear an air pod ahead", 0, 50, 10);
+                }
+                run.lastAir.put(id, max);
+                continue;
+            }
+            double m = 1.0;
+            if (SunkenMap.in(run.layout.pit, p.getX(), p.getY(), p.getZ(), 0)) m = PIT_PRESSURE;
+            else if (run.layout.inPassage(p.getX(), p.getY(), p.getZ())) m = PASSAGE_PRESSURE;
+            else if (run.layout.inVault(p.getX(), p.getY(), p.getZ())) m = VAULT_PRESSURE;
+            if (hasIdol(p)) m *= IDOL_PRESSURE;
+            if (run.boon(id, DEEP_LUNGS_BOON)) m *= DEEP_LUNGS;
+            m *= RESP_FACTOR[respiration(p)]; // 5.25b: Respiration counts a bit less here
+            Integer prev = run.lastAir.get(id);
+            if (prev != null && air < prev && air > -20 && m != 1.0) {
+                double extra = (prev - air) * (m - 1) + run.airDebt.getOrDefault(id, 0.0);
+                int take = (int) extra;
+                run.airDebt.put(id, extra - take);
+                if (take != 0) {
+                    air = Math.max(-19, Math.min(max, air - take));
+                    p.setAirSupply(air);
+                }
+            }
+            run.lastAir.put(id, air);
+        }
+    }
+
+    private static void giveAir(Run run, ServerPlayer p, int amount) {
+        int max = p.getMaxAirSupply();
+        int air = Math.min(max, Math.max(0, p.getAirSupply()) + amount);
+        p.setAirSupply(air);
+        run.lastAir.put(p.getUUID(), air);
+    }
+
+    /** Twice a second: crewmates close together even out their air. */
+    private static void buddyBreath(Run run) {
+        List<ServerPlayer> in = new ArrayList<>();
+        for (ServerPlayer p : inside(run)) if (active(p)) in.add(p);
+        for (int i = 0; i < in.size(); i++)
+            for (int j = i + 1; j < in.size(); j++) {
+                ServerPlayer a = in.get(i), b = in.get(j);
+                if (a.distanceToSqr(b) > BUDDY_RANGE * BUDDY_RANGE) continue;
+                int aa = a.getAirSupply(), bb = b.getAirSupply();
+                if (Math.abs(aa - bb) < 4) continue;
+                int mean = (aa + bb) / 2;
+                int na = aa + Math.max(-BUDDY_STEP, Math.min(BUDDY_STEP, mean - aa)), nb = bb + Math.max(-BUDDY_STEP, Math.min(BUDDY_STEP, mean - bb));
+                a.setAirSupply(na);
+                b.setAirSupply(nb);
+                run.lastAir.put(a.getUUID(), na);
+                run.lastAir.put(b.getUUID(), nb);
+            }
+    }
+
+    private static void ventSparkle(ServerLevel l, Run run) {
+        for (Map.Entry<Long, int[]> e : run.vents.entrySet()) {
+            if (e.getValue()[0] <= 0) continue;
+            BlockPos v = BlockPos.of(e.getKey());
+            l.sendParticles(ParticleTypes.BUBBLE_COLUMN_UP, v.getX() + 0.5, v.getY() + 1.1, v.getZ() + 0.5, 3, 0.2, 0.3, 0.2, 0.02);
+        }
+        for (int k = 0; k < run.layout.pods.size(); k++) {
+            if (!run.vaultOpen || run.podUsed[k]) continue;
+            BlockPos v = run.layout.pods.get(k);
+            l.sendParticles(ParticleTypes.BUBBLE_COLUMN_UP, v.getX() + 0.5, v.getY() + 1.1, v.getZ() + 0.5, 5, 0.3, 0.5, 0.3, 0.02);
+        }
+    }
+
+    /** Every other tick: vents, the seals, the crystal, the boon shells and the idol react to whoever swims up to them. */
+    private static void touches(ServerLevel l, Run run) {
+        for (ServerPlayer p : inside(run)) {
+            if (!active(p)) continue;
+            UUID id = p.getUUID();
+            // Air vents.
+            for (Map.Entry<Long, int[]> e : run.vents.entrySet()) {
+                BlockPos v = BlockPos.of(e.getKey());
+                double dx = p.getX() - (v.getX() + 0.5), dz = p.getZ() - (v.getZ() + 0.5), dy = p.getY() - v.getY();
+                if (dx * dx + dz * dz > VENT_RANGE * VENT_RANGE || dy < -0.5 || dy > 2.5) continue;
+                int[] puffs = e.getValue();
+                int max = p.getMaxAirSupply();
+                if (puffs[0] > 0 && p.getAirSupply() <= max - VENT_AIR / 2 && ticks >= run.puffReady.getOrDefault(id, 0L)) {
+                    puffs[0]--;
+                    run.puffReady.put(id, ticks + PUFF_COOLDOWN_TICKS);
+                    giveAir(run, p, VENT_AIR);
+                    l.playSound(null, v, SoundEvents.BUCKET_EMPTY, SoundSource.BLOCKS, 0.8f, 1.6f);
+                    l.sendParticles(ParticleTypes.BUBBLE_COLUMN_UP, v.getX() + 0.5, v.getY() + 1.2, v.getZ() + 0.5, 25, 0.3, 0.6, 0.3, 0.1);
+                }
+                tip(p, puffs[0] > 0 ? "§dAir vent: §f" + puffs[0] + "§7/" + puffs[1] + " puffs" : "§8Air vent empty §7- it refills slowly");
+                break;
+            }
+            SunkenMap.Room r = inRoom(run, p);
+            if (r == null) continue;
+            // The crystal: see the order again.
+            if (r.active && !r.sealsDone && r.replayStep < 0 && ticks >= r.nextCrystal && near(p, r.crystal, CRYSTAL_RANGE)) {
+                r.nextCrystal = ticks + 80;
+                startReplay(r, 5);
+                tip(p, "§dThe crystal hums... §7watch the lamps!");
+            }
+            // The idol's pedestal.
+            if (r.idolSpot != null && !run.idolTaken && near(p, r.idolSpot, SHELL_RANGE)) {
+                run.idolTaken = true;
+                l.setBlock(r.idolSpot, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+                EndRewards.give(p, idol());
+                l.playSound(null, r.idolSpot, SoundEvents.ELDER_GUARDIAN_CURSE, SoundSource.BLOCKS, 0.6f, 1.6f);
+                for (ServerPlayer m : inside(run)) Announce.title(m, "§6§lTHE SUNKEN IDOL", "§7" + p.getName().getString() + " has it - bring it to the vault (+20% cash)", 5, 60, 10);
+            }
+            // Boon shells.
+            if (r.shellsUp && !r.boonTaken.contains(id))
+                for (int k = 0; k < 2; k++) {
+                    if (r.boons[k] < 0 || !near(p, r.shells[k], SHELL_RANGE)) continue;
+                    int b = r.boons[k];
+                    Set<Integer> mine = run.boons.computeIfAbsent(id, x -> new HashSet<>());
+                    if (mine.contains(b)) {
+                        tip(p, "§7You already have §b" + BOON_NAMES[b] + " §7- try the other shell.");
+                        continue;
+                    }
+                    mine.add(b);
+                    r.boonTaken.add(id);
+                    l.playSound(null, r.shells[k], SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 0.8f, 1.4f);
+                    Announce.title(p, "§b§l" + BOON_NAMES[b].toUpperCase(), "§7For the rest of the trip: " + BOON_TIPS[b], 5, 50, 10);
+                    boolean everyone = true;
+                    for (ServerPlayer m : inside(run)) if (!r.boonTaken.contains(m.getUUID())) everyone = false;
+                    if (everyone) clearShells(l, r);
+                    break;
+                }
+            // Tide Seals.
+            if (!r.active || r.sealsDone || r.replayStep >= 0) {
+                run.lastSeal.remove(id);
+                continue;
+            }
+            int hit = -1;
+            double best = SEAL_RANGE * SEAL_RANGE;
+            for (int i = 0; i < r.seals.size(); i++) {
+                BlockPos b = r.seals.get(i);
+                double dd = p.distanceToSqr(b.getX() + 0.5, b.getY() + 0.5 - 0.9, b.getZ() + 0.5);
+                if (dd <= best) {
+                    best = dd;
+                    hit = i;
+                }
+            }
+            if (hit < 0) {
+                run.lastSeal.remove(id);
+                continue;
+            }
+            Integer last = run.lastSeal.put(id, hit);
+            if (last != null && last == hit) continue;
+            touchSeal(l, run, r, p, hit);
+        }
+    }
+
+    private static boolean near(ServerPlayer p, BlockPos b, double range) {
+        return b != null && p.distanceToSqr(b.getX() + 0.5, b.getY() + 0.5 - 0.9, b.getZ() + 0.5) <= range * range;
+    }
+
+    // ---- 5.25: Tide Seals ----
+
+    private static boolean solved(SunkenMap.Room r, int seal) {
+        for (int k = 0; k < r.progress; k++) if (r.order[k] == seal) return true;
+        return false;
+    }
+
+    private static void touchSeal(ServerLevel l, Run run, SunkenMap.Room r, ServerPlayer p, int seal) {
+        if (solved(r, seal)) return;
+        BlockPos pos = r.seals.get(seal);
+        if (r.order[r.progress] == seal) {
+            r.progress++;
+            l.setBlock(pos, SunkenMap.block(SunkenMap.SEAL_ON), Block.UPDATE_CLIENTS);
+            l.playSound(null, pos, SoundEvents.NOTE_BLOCK_CHIME.value(), SoundSource.BLOCKS, 1.5f, 0.7f + 0.15f * r.progress);
+            l.sendParticles(ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 12, 0.4, 0.4, 0.4, 0.05);
+            if (r.progress >= r.order.length) {
+                r.sealsDone = true;
+                for (ServerPlayer m : inside(run)) {
+                    if (!r.inside(m.getX(), m.getY(), m.getZ(), 1)) continue;
+                    giveAir(run, m, SEAL_LAST_AIR);
+                    Announce.title(m, "§b§lSEALS SET", r.guards.isEmpty() && r.wave >= 2 ? "§7The room is yours!" : "§7Now beat the guards", 5, 40, 10);
+                }
+            } else {
+                giveAir(run, p, SEAL_AIR);
+                tip(p, "§bSeal " + r.progress + "/" + r.order.length + " §7(+air)");
+            }
+            return;
+        }
+        if (run.boon(p.getUUID(), STEADY_HANDS) && r.steadyUsed.add(p.getUUID())) {
+            tip(p, "§bSteady Hands! §7That wrong seal didn't count (once per room).");
+            l.playSound(null, pos, SoundEvents.NOTE_BLOCK_BASS.value(), SoundSource.BLOCKS, 1f, 1.2f);
+            return;
+        }
+        // Wrong: everything goes dark again, and one more guard comes.
+        r.progress = 0;
+        for (BlockPos sp : r.seals) l.setBlock(sp, SunkenMap.block(SunkenMap.SEAL_OFF), Block.UPDATE_CLIENTS);
+        r.lit = null;
+        l.playSound(null, pos, SoundEvents.NOTE_BLOCK_BASS.value(), SoundSource.BLOCKS, 2f, 0.5f);
+        int[] b = r.box;
+        Mob m = spawnGuard(l, run, RNG.nextBoolean() ? EntityTypes.GUARDIAN : EntityTypes.DROWNED,
+                new BlockPos(b[0] + 1 + RNG.nextInt(b[3] - b[0] - 1), b[1] + 1 + RNG.nextInt(3), b[2] + 1 + RNG.nextInt(b[5] - b[2] - 1)), r);
+        if (m != null) r.guards.add(m.getUUID());
+        for (ServerPlayer x : inside(run))
+            if (r.inside(x.getX(), x.getY(), x.getZ(), 1)) Announce.title(x, "", "§c§lWrong seal! §7The order starts over - and a guard joins in", 0, 40, 10);
+        startReplay(r, 40);
+    }
+
+    private static void startReplay(SunkenMap.Room r, int delay) {
+        r.replayStep = 0;
+        r.replayNext = ticks + delay;
+    }
+
+    /** Every tick: the replay flashes the order one lamp at a time; a flashed lamp goes dark again. */
+    private static void seals(ServerLevel l, Run run) {
+        boolean ink = ticks < run.inkUntil;
+        for (SunkenMap.Room r : run.layout.rooms) {
+            if (!r.active || r.order.length == 0) continue;
+            if (r.lit != null && ticks >= r.unlightAt) {
+                int idx = r.seals.indexOf(r.lit);
+                if (idx >= 0 && !solved(r, idx) && !r.sealsDone) l.setBlock(r.lit, SunkenMap.block(SunkenMap.SEAL_OFF), Block.UPDATE_CLIENTS);
+                r.lit = null;
+            }
+            if (r.replayStep < 0 || ticks < r.replayNext) continue;
+            if (r.sealsDone || r.replayStep >= r.order.length) {
+                r.replayStep = -1;
+                continue;
+            }
+            int idx = r.order[r.replayStep];
+            BlockPos pos = r.seals.get(idx);
+            if (!solved(r, idx)) {
+                l.setBlock(pos, SunkenMap.block(SunkenMap.SEAL_ON), Block.UPDATE_CLIENTS);
+                r.lit = pos;
+                r.unlightAt = ticks + 10;
+            }
+            l.playSound(null, pos, SoundEvents.NOTE_BLOCK_BELL.value(), SoundSource.BLOCKS, 1.5f, 0.6f + 0.15f * r.replayStep);
+            l.sendParticles(ParticleTypes.GLOW, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, ink ? 30 : 12, 0.5, 0.5, 0.5, 0.05);
+            if (ink) l.sendParticles(ParticleTypes.END_ROD, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 15, 0.3, 0.3, 0.3, 0.05);
+            r.replayStep++;
+            r.replayNext = ticks + 16;
+        }
+    }
+
+    // ---- Rooms: walk in, seals + guards, cleared ----
 
     private static void rooms(ServerLevel l, Run run) {
-        if (run.openWing < 0) return;
-        boolean wingDone = true;
         for (SunkenMap.Room r : run.layout.rooms) {
-            if (r.wing != run.openWing) continue;
-            if (!r.cleared) wingDone = false;
             if (r.cleared) continue;
             List<ServerPlayer> in = new ArrayList<>();
             for (ServerPlayer p : inside(run)) if (r.inside(p.getX(), p.getY(), p.getZ(), 0)) in.add(p);
             if (!r.active) {
                 if (in.isEmpty()) continue;
                 r.active = true;
-                r.nextLeak = ticks + LEAK_SECONDS * 20L;
+                if (run.firstWing < 0) {
+                    run.firstWing = r.wing;
+                    for (ServerPlayer m : inside(run)) Lobby.msg(m, "§bFirst wing: §f" + SunkenMap.WING_NAMES[r.wing] + " §7- its chests give a bonus roll.");
+                }
+                List<Integer> pick = new ArrayList<>();
+                for (int i = 0; i < r.seals.size(); i++) pick.add(i);
+                Collections.shuffle(pick, RNG);
+                int n = Math.min(r.seals.size(), SEALS[run.diff]);
+                r.order = new int[n];
+                for (int i = 0; i < n; i++) r.order[i] = pick.get(i);
                 spawnWave(l, run, r);
-            }
-            // Sponges for everyone who walks in.
-            for (ServerPlayer p : in) if (r.sponged.add(p.getUUID())) {
-                EndRewards.give(p, sponge(new ItemStack(Items.SPONGE, 2)));
-                Lobby.msg(p, "§7Wren's crew left §f2 sponges §7here for you §8(they stay in the monument)§7.");
+                startReplay(r, 30);
             }
             r.guards.removeIf(id -> {
                 Entity e = l.getEntity(id);
                 return e == null || !e.isAlive();
             });
-            if (r.guards.isEmpty() && r.wave >= 2) {
+            if (r.sealsDone && r.guards.isEmpty() && r.wave >= 2) {
                 roomCleared(l, run, r);
                 continue;
             }
             if (r.wave < 2 && (r.guards.isEmpty() || ticks >= r.nextWave)) spawnWave(l, run, r);
-            // Rising Tide.
-            double rate = FLOOD[run.diff] * (1 + CREW_FLOOD * (run.crewSize - 1)) * (1 + LEAK_FLOOD * r.leaks.size());
-            r.level = Math.min(SunkenMap.ROOM_HEIGHT, r.level + rate);
-            SunkenMap.applyLevel(l, r, (int) Math.ceil(r.level - 0.001));
-            if (ticks >= r.nextLeak && r.leaks.size() < MAX_LEAKS && r.level < SunkenMap.ROOM_HEIGHT - 0.5) {
-                r.nextLeak = ticks + LEAK_SECONDS * 20L;
-                openLeak(l, run, r);
-            }
-            for (ServerPlayer p : in) {
-                int pct = (int) Math.round(100 * r.level / SunkenMap.ROOM_HEIGHT);
-                Announce.actionBar(p, "§bWater: §f" + pct + "% §8| " + (r.leaks.isEmpty() ? "§7no leaks" : "§c" + r.leaks.size() + " leak" + (r.leaks.size() == 1 ? "" : "s") + " (crouch next to it)")
-                        + " §8| §7guards §f" + r.guards.size());
-            }
-            for (long lk : r.leaks) {
-                BlockPos lp = BlockPos.of(lk);
-                l.sendParticles(ParticleTypes.SPLASH, lp.getX() + 0.5, lp.getY() + 0.5, lp.getZ() + 0.5, 12, 0.3, 0.3, 0.3, 0.1);
-            }
+            for (ServerPlayer p : in)
+                if (run.puffReady.getOrDefault(p.getUUID(), 0L) < ticks - 20)
+                    Announce.actionBar(p, (r.sealsDone ? "§aSeals set" : "§bSeals §f" + r.progress + "/" + r.order.length) + " §8| §7guards §f" + r.guards.size()
+                            + (r.wave < 2 ? " §8(more coming)" : ""));
         }
-        if (wingDone) {
-            int w = run.openWing;
+        for (int w = 0; w < 3; w++) {
+            if (run.wingDone[w]) continue;
+            boolean done = true;
+            for (SunkenMap.Room r : run.layout.wingRooms(w)) if (!r.cleared) done = false;
+            if (!done) continue;
             run.wingDone[w] = true;
-            run.openWing = -1;
-            boolean all = run.wingDone[0] && run.wingDone[1] && run.wingDone[2];
             for (ServerPlayer m : inside(run)) Announce.title(m, "§a§lWING CLEARED", "§7" + SunkenMap.WING_NAMES[w], 5, 50, 10);
-            if (all) openVault(l, run);
-            else offerGates(run);
+            if (run.wingDone[0] && run.wingDone[1] && run.wingDone[2]) openVault(l, run);
         }
     }
 
@@ -937,7 +1296,7 @@ public final class SunkenMonument {
         r.wave++;
         r.nextWave = ticks + WAVE_SECONDS * 20L;
         if (r.wave == 1) for (ServerPlayer p : inside(run))
-            if (r.inside(p.getX(), p.getY(), p.getZ(), 1)) Announce.title(p, "§c§lGUARDS!", "§7Drain the room with the pump - beat them all", 5, 40, 10);
+            if (r.inside(p.getX(), p.getY(), p.getZ(), 1)) Announce.title(p, "§c§lGUARDS!", "§7Watch the lamps - touch the Tide Seals in order", 5, 40, 10);
     }
 
     private static Mob spawnGuard(ServerLevel l, Run run, EntityType<? extends Mob> type, BlockPos at, SunkenMap.Room room) {
@@ -969,7 +1328,7 @@ public final class SunkenMonument {
         ServerPlayer best = null;
         double bd = Double.MAX_VALUE;
         for (ServerPlayer p : inside(run)) {
-            if (DOWNED.containsKey(p.getUUID())) continue;
+            if (!active(p)) continue;
             double d = p.distanceToSqr(at.getX(), at.getY(), at.getZ());
             if (d < bd) {
                 bd = d;
@@ -991,103 +1350,40 @@ public final class SunkenMonument {
         }
     }
 
-    private static void pump(ServerPlayer p, Run run, SunkenMap.Room r) {
-        if (DOWNED.containsKey(p.getUUID()) || r.cleared) {
-            if (r.cleared) tip(p, "§7This room is already drained.");
-            return;
-        }
-        Long last = run.pumpUsed.get(p.getUUID());
-        if (last != null && ticks - last < PUMP_COOLDOWN) return;
-        run.pumpUsed.put(p.getUUID(), ticks);
-        r.level = Math.max(0, r.level - PUMP);
-        SunkenMap.applyLevel(level(), r, (int) Math.ceil(r.level - 0.001));
-        p.level().playSound(null, r.pump, SoundEvents.PISTON_EXTEND, SoundSource.BLOCKS, 0.6f, 0.7f + RNG.nextFloat() * 0.3f);
-        ((ServerLevel) p.level()).sendParticles(ParticleTypes.BUBBLE_COLUMN_UP, r.pump.getX() + 0.5, r.pump.getY() + 1.2, r.pump.getZ() + 0.5, 8, 0.2, 0.3, 0.2, 0.05);
-        tip(p, "§bPumping... water §f" + Math.round(100 * r.level / SunkenMap.ROOM_HEIGHT) + "%");
-    }
-
-    private static void openLeak(ServerLevel l, Run run, SunkenMap.Room r) {
-        List<BlockPos> free = new ArrayList<>();
-        for (BlockPos s : r.leakSpots) if (!r.leaks.contains(s.asLong())) free.add(s);
-        if (free.isEmpty()) return;
-        BlockPos s = free.get(RNG.nextInt(free.size()));
-        r.leaks.add(s.asLong());
-        l.setBlock(s, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
-        l.playSound(null, s, SoundEvents.BUCKET_EMPTY, SoundSource.BLOCKS, 1.5f, 0.6f);
-        for (ServerPlayer p : inside(run)) if (r.inside(p.getX(), p.getY(), p.getZ(), 1)) Announce.title(p, "", "§c§lA LEAK! §7Crouch next to it for 3 seconds", 0, 30, 10);
-    }
-
-    /** Crouching next to a leak for PLUG_TICKS plugs it. */
-    private static void plugging(Run run) {
-        if (run.openWing < 0) return;
-        for (ServerPlayer p : inside(run)) {
-            if (!p.isShiftKeyDown() || DOWNED.containsKey(p.getUUID())) {
-                run.plugging.remove(p.getUUID());
-                continue;
-            }
-            SunkenMap.Room room = null;
-            BlockPos leak = null;
-            for (SunkenMap.Room r : run.layout.rooms) {
-                if (r.leaks.isEmpty() || !r.inside(p.getX(), p.getY(), p.getZ(), 0)) continue;
-                for (long lk : r.leaks) {
-                    BlockPos lp = BlockPos.of(lk);
-                    if (p.distanceToSqr(lp.getX() + 0.5, lp.getY() + 0.5, lp.getZ() + 0.5) <= 3.5 * 3.5) {
-                        room = r;
-                        leak = lp;
-                        break;
-                    }
-                }
-                if (leak != null) break;
-            }
-            if (leak == null) {
-                run.plugging.remove(p.getUUID());
-                continue;
-            }
-            int t = run.plugging.merge(p.getUUID(), 1, Integer::sum);
-            if (t % 5 == 0) Announce.actionBar(p, "§bPlugging the leak... §f" + Math.min(100, t * 100 / PLUG_TICKS) + "%");
-            if (t >= PLUG_TICKS) {
-                run.plugging.remove(p.getUUID());
-                room.leaks.remove(leak.asLong());
-                ServerLevel l = level();
-                boolean wet = leak.getY() - room.box[1] < room.placedLevel;
-                l.setBlock(leak, wet ? Blocks.WATER.defaultBlockState() : Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-                l.playSound(null, leak, SoundEvents.WOOD_PLACE, SoundSource.BLOCKS, 1f, 0.8f);
-                tip(p, "§aLeak plugged!");
-            }
-        }
-    }
-
     private static void roomCleared(ServerLevel l, Run run, SunkenMap.Room r) {
         r.cleared = true;
-        for (long lk : r.leaks) l.setBlock(BlockPos.of(lk), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
-        r.leaks.clear();
-        r.level = 0;
-        SunkenMap.applyLevel(l, r, 0);
+        r.replayStep = -1;
+        for (BlockPos sp : r.seals) l.setBlock(sp, SunkenMap.block(SunkenMap.SEAL_ON), Block.UPDATE_CLIENTS);
+        // Two boon shells (two different boons, picked at random).
+        List<Integer> pick = new ArrayList<>(List.of(0, 1, 2, 3, 4));
+        Collections.shuffle(pick, RNG);
+        for (int k = 0; k < 2; k++) {
+            r.boons[k] = pick.get(k);
+            l.setBlock(r.shells[k], SunkenMap.block(BOON_BLOCKS[r.boons[k]]), Block.UPDATE_ALL);
+        }
+        r.shellsUp = true;
         l.playSound(null, r.chest, SoundEvents.CHEST_OPEN, SoundSource.BLOCKS, 1f, 1f);
         for (ServerPlayer p : inside(run)) {
-            if (r.inside(p.getX(), p.getY(), p.getZ(), 2)) Announce.title(p, "§a§lROOM CLEARED", "§7The water drains away - open the chest", 5, 40, 10);
-            else Lobby.msg(p, "§aA room in the " + SunkenMap.WING_SHORT[r.wing] + " wing was cleared!");
+            if (r.inside(p.getX(), p.getY(), p.getZ(), 2)) {
+                Announce.title(p, "§a§lROOM CLEARED", "§7Open the chest - and touch a boon shell", 5, 40, 10);
+                Lobby.msg(p, "§bBoon shells: §f" + BOON_NAMES[r.boons[0]] + " §7(" + BOON_TIPS[r.boons[0]] + ") §8or §f" + BOON_NAMES[r.boons[1]] + " §7(" + BOON_TIPS[r.boons[1]] + ")");
+            } else Lobby.msg(p, "§aA room in the " + SunkenMap.WING_SHORT[r.wing] + " wing was cleared!");
         }
     }
 
+    private static void clearShells(ServerLevel l, SunkenMap.Room r) {
+        r.shellsUp = false;
+        for (BlockPos sp : r.shells) if (sp != null) l.setBlock(sp, Blocks.WATER.defaultBlockState(), Block.UPDATE_ALL);
+    }
+
+    /** 5.25: like the Nether - the chest opens a chest of your own; take out what you want (leftovers are lost). */
     private static void openChest(ServerPlayer p, Run run, SunkenMap.Room r) {
         if (DOWNED.containsKey(p.getUUID())) return;
         if (!r.cleared) {
-            tip(p, "§cBeat this room's guards first.");
+            tip(p, "§cSet the Tide Seals and beat this room's guards first.");
             return;
         }
-        if (!r.looted.add(p.getUUID())) {
-            tip(p, "§7You've already emptied this chest.");
-            return;
-        }
-        List<ItemStack> loot = roomLoot((ServerLevel) p.level(), run.diff, r.wing, r.wing == run.firstWing);
-        StringBuilder sb = new StringBuilder();
-        for (ItemStack s : loot) {
-            if (sb.length() > 0) sb.append("§7, ");
-            sb.append("§f").append(s.getCount() > 1 ? s.getCount() + " " : "").append(s.getHoverName().getString());
-            EndRewards.give(p, s);
-        }
-        Lobby.msg(p, "§bChest: " + (sb.length() == 0 ? "§7just seaweed" : sb.toString()));
+        ExpeditionChests.open(p, r, "§3Room chest §8(yours)", () -> roomLoot((ServerLevel) p.level(), run.diff, r.wing, r.wing == run.firstWing));
     }
 
     private static boolean roll(int pct) {
@@ -1118,20 +1414,45 @@ public final class SunkenMonument {
         return out;
     }
 
+    // ---- The Sunken Idol ----
+
+    static ItemStack idol() {
+        return Stacks.tag(Stacks.named(new ItemStack(Items.RAW_GOLD_BLOCK), "§6§lSunken Idol", "§7Heavy! You swim slower and your", "§7air goes faster while you carry it.",
+                "§7Have it in the vault when the", "§7Tidemother falls: §6+20% cash §7for all.", "§8Stays in the monument."), IDOL_TAG);
+    }
+
+    static boolean hasIdol(ServerPlayer p) {
+        Inventory inv = p.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) if (Stacks.is(inv.getItem(i), IDOL_TAG)) return true;
+        return false;
+    }
+
+    private static void removeIdol(ServerPlayer p) {
+        Inventory inv = p.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) if (Stacks.is(inv.getItem(i), IDOL_TAG)) inv.setItem(i, ItemStack.EMPTY);
+    }
+
+    /** 5.25: blocks that would make an air pocket (or a bubble column, or Conduit Power) can't be placed. */
+    private static boolean airMaker(ItemStack held) {
+        String id = BuiltInRegistries.ITEM.getKey(held.getItem()).getPath();
+        return id.equals("sponge") || id.equals("wet_sponge") || id.equals("conduit") || id.equals("soul_sand") || id.equals("magma_block")
+                || id.endsWith("_door") || id.endsWith("_bed");
+    }
+
     // ---- Currents, the Sunken Bell, ink ----
 
     private static void currents(Run run) {
         if (run.layout == null) return;
         ServerLevel l = level();
+        double speed = run.tide == STRONG_CURRENTS ? 1.35 : 0.9;
         for (ServerPlayer p : inside(run)) {
-            if (DOWNED.containsKey(p.getUUID())) continue;
+            if (DOWNED.containsKey(p.getUUID()) || p.isSpectator()) continue;
             for (SunkenMap.Current c : run.layout.currents) {
-                if (!run.wingDone[c.wing] && run.openWing != c.wing) continue;
                 if (!c.inside(p.getX(), p.getY(), p.getZ())) continue;
                 if (c.trap && c.atExit(p.getX(), p.getZ(), run.layout.center.getX(), run.layout.center.getZ())) {
                     double[] pl = run.layout.pitLanding;
                     p.teleportTo(l, pl[0], pl[1], pl[2], Set.of(), p.getYRot(), p.getXRot(), true);
-                    Announce.title(p, "§c§lTRAP CURRENT!", "§7The Guardian Pit - swim up and out!", 5, 50, 10);
+                    Announce.title(p, "§c§lTRAP CURRENT!", "§7The Guardian Pit - swim up and out, fast (the air goes quicker down here)", 5, 50, 10);
                     for (int i = 0; i < 2 + run.diff / 2; i++) {
                         int[] b = run.layout.pit;
                         Mob m = spawnGuard(l, run, EntityTypes.GUARDIAN, new BlockPos(b[0] + 1 + RNG.nextInt(5), b[1] + 1, b[2] + 1 + RNG.nextInt(5)), null);
@@ -1139,7 +1460,7 @@ public final class SunkenMonument {
                     }
                     break;
                 }
-                p.setDeltaMovement(c.vx * 0.9, 0.0, c.vz * 0.9);
+                p.setDeltaMovement(c.vx * speed, 0.0, c.vz * speed);
                 p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(p));
                 if (ticks % 4 == 0) l.sendParticles(ParticleTypes.BUBBLE, p.getX(), p.getY() + 0.5, p.getZ(), 6, 0.4, 0.4, 0.4, 0.05);
                 break;
@@ -1148,10 +1469,11 @@ public final class SunkenMonument {
     }
 
     private static void bellAndInk(ServerLevel l, Run run) {
+        int toll = run.tide == RESTLESS_GUARDS ? 80 : BELL_TOLL_SECONDS;
         if (ticks >= run.nextToll - 60 && ticks < run.nextToll - 40)
             for (ServerPlayer p : inside(run)) p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.NOTE_BLOCK_CHIME.value(), SoundSource.AMBIENT, 1.5f, 0.6f);
         if (ticks >= run.nextToll) {
-            run.nextToll = ticks + BELL_TOLL_SECONDS * 20L;
+            run.nextToll = ticks + toll * 20L;
             run.rageUntil = ticks + BELL_RAGE_SECONDS * 20L;
             for (ServerPlayer p : inside(run)) {
                 p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.BELL_BLOCK, SoundSource.AMBIENT, 2f, 0.5f);
@@ -1167,19 +1489,19 @@ public final class SunkenMonument {
             }
         }
         if (ticks >= run.nextInk) {
+            int secs = run.tide == DARK_WATER ? 8 : run.tide == CALM_SEAS ? 3 : INK_SECONDS;
             run.nextInk = ticks + INK_EVERY * 20L;
+            run.inkUntil = ticks + secs * 20L;
             for (ServerPlayer p : inside(run)) {
-                if (run.layout.inDock(p.getX(), p.getY(), p.getZ()) || inDrainedRoom(run, p)) continue;
-                p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, INK_SECONDS * 20, 0, false, false));
+                if (run.layout.inDock(p.getX(), p.getY(), p.getZ())) continue;
+                int t = run.boon(p.getUUID(), BRIGHT_EYES) ? secs * 10 : secs * 20;
+                p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, t, 0, false, false));
                 l.sendParticles(ParticleTypes.SQUID_INK, p.getX(), p.getY() + 1, p.getZ(), 40, 1.5, 1, 1.5, 0.05);
-                tip(p, "§8§lINK BLACKOUT");
+                tip(p, "§8§lINK BLACKOUT §7- watch for the glowing seals");
             }
+            // Ink Reveals: the rooms being worked on show their order through the dark.
+            for (SunkenMap.Room r : run.layout.rooms) if (r.active && !r.cleared && !r.sealsDone && r.replayStep < 0) startReplay(r, 10);
         }
-    }
-
-    private static boolean inDrainedRoom(Run run, ServerPlayer p) {
-        for (SunkenMap.Room r : run.layout.rooms) if (r.inside(p.getX(), p.getY(), p.getZ(), 0) && r.placedLevel < SunkenMap.ROOM_HEIGHT) return true;
-        return false;
     }
 
     // ---- The vault gate and the diving bell ----
@@ -1192,11 +1514,14 @@ public final class SunkenMonument {
         }
         run.bellMax = BELL_HP * (1 + 0.25 * (run.crewSize - 1));
         run.bellHp = run.bellMax;
+        run.bellAirMax = BELL_AIR_PER_PLAYER * run.crewSize;
+        run.bellAir = run.bellAirMax;
         placeBell(l, run);
         run.nextPassageGuards = ticks + 15 * 20L;
         for (ServerPlayer p : inside(run)) {
             Announce.title(p, "§6§lTHE VAULT GATE IS OPEN", "§7Down the shaft - push Wren's diving bell to the vault", 10, 70, 20);
-            Lobby.msg(p, "§6[Captain Wren] §fMy diving bell's at the bottom of the shaft. §7Stand behind it to push it along the passage - you can breathe near it. Keep the guards off it!");
+            Lobby.msg(p, "§6[Captain Wren] §fMy diving bell's at the bottom of the shaft. §7Stand behind it to push it - nobody pushing and the current drags it back. "
+                    + "§fIt's the only air down there §7(stay within " + (int) BELL_BREATH_RANGE + " blocks), and its tank runs dry: beat the guards at the §dair pods §7so it can refill. Keep the guards off it!");
         }
     }
 
@@ -1220,29 +1545,62 @@ public final class SunkenMonument {
     private static void divingBell(ServerLevel l, Run run) {
         BlockPos c = run.layout.bellPos(run.bellU);
         Vec3 bc = Vec3.atCenterOf(c);
-        // Breathing near the bell.
-        for (ServerPlayer p : inside(run)) if (p.distanceToSqr(bc) <= 5.5 * 5.5) p.addEffect(new MobEffectInstance(MobEffects.WATER_BREATHING, 60, 0, false, false));
         if (run.bellLost) return;
         // Guards gnaw at it.
         int hits = 0;
         for (Mob m : l.getEntitiesOfClass(Mob.class, new AABB(c).inflate(3), m -> m.entityTags().contains(GUARD_TAG))) hits++;
         if (hits > 0) damageBell(l, run, 2.0 * hits);
         if (run.bellLost) return;
-        // Pushing: crew behind it (toward the shaft) push it on.
+        // Pushing: crew behind it (toward the shaft) push it on; nobody pushing = the current drags it back.
         int pushers = 0;
         for (ServerPlayer p : inside(run)) {
-            if (DOWNED.containsKey(p.getUUID()) || !run.layout.inPassage(p.getX(), p.getY(), p.getZ())) continue;
+            if (!active(p) || !run.layout.inPassage(p.getX(), p.getY(), p.getZ())) continue;
             double behind = p.getZ() - (c.getZ() + 0.5); // the bell moves toward -z
             if (behind > 0.5 && behind <= 6 && Math.abs(p.getX() - bc.x) <= 3.5) pushers++;
         }
         if (pushers > 0 && run.bellU < SunkenMap.BELL_END) {
-            run.bellProgress += BELL_PUSH * Math.min(3, pushers);
+            run.bellProgress = Math.max(0, run.bellProgress) + BELL_PUSH * Math.min(3, pushers);
             int steps = (int) run.bellProgress;
             if (steps > 0) {
                 run.bellProgress -= steps;
                 run.bellU = Math.min(SunkenMap.BELL_END, run.bellU + steps);
                 placeBell(l, run);
                 l.playSound(null, c, SoundEvents.PISTON_CONTRACT, SoundSource.BLOCKS, 1f, 0.6f);
+            }
+        } else if (pushers == 0 && run.bellU > SunkenMap.BELL_START) {
+            run.bellProgress = Math.min(0, run.bellProgress) - BELL_DRIFT * (run.tide == STRONG_CURRENTS ? 1.5 : 1.0);
+            if (run.bellProgress <= -1) {
+                run.bellProgress += 1;
+                run.bellU--;
+                placeBell(l, run);
+                l.playSound(null, c, SoundEvents.PISTON_EXTEND, SoundSource.BLOCKS, 0.8f, 0.5f);
+            }
+        }
+        // The air pods: their guards come out as the bell nears; beat them and the bell refills when it reaches the pod.
+        for (int k = 0; k < run.layout.pods.size(); k++) {
+            int pu = run.layout.podU.get(k);
+            BlockPos pod = run.layout.pods.get(k);
+            if (!run.podSpawned[k] && run.bellU >= pu - 8) {
+                run.podSpawned[k] = true;
+                for (int i = 0; i < 2 + run.diff / 2 + (run.crewSize - 1); i++) {
+                    Mob m = spawnGuard(l, run, RNG.nextBoolean() ? EntityTypes.GUARDIAN : EntityTypes.DROWNED, pod.offset(RNG.nextInt(3) - 1, 1 + RNG.nextInt(2), RNG.nextInt(3) - 1), null);
+                    if (m != null) run.podGuards.get(k).add(m.getUUID());
+                }
+                for (ServerPlayer p : inside(run)) if (run.layout.inPassage(p.getX(), p.getY(), p.getZ()))
+                    Announce.title(p, "", "§dAn air pod ahead is guarded §7- beat them to refill the bell", 0, 50, 10);
+            }
+            if (run.podSpawned[k] && !run.podUsed[k]) {
+                run.podGuards.get(k).removeIf(id -> {
+                    Entity e = l.getEntity(id);
+                    return e == null || !e.isAlive();
+                });
+                if (run.podGuards.get(k).isEmpty() && Math.abs(run.bellU - pu) <= 2) {
+                    run.podUsed[k] = true;
+                    run.bellAir = Math.min(run.bellAirMax, run.bellAir + POD_AIR_PER_PLAYER * run.crewSize);
+                    l.playSound(null, pod, SoundEvents.BUCKET_EMPTY, SoundSource.BLOCKS, 2f, 0.8f);
+                    l.sendParticles(ParticleTypes.BUBBLE_COLUMN_UP, pod.getX() + 0.5, pod.getY() + 1.5, pod.getZ() + 0.5, 60, 0.6, 1.5, 0.6, 0.1);
+                    for (ServerPlayer p : inside(run)) Announce.title(p, "", "§d§lAir pod! §7The bell's tank is refilled", 0, 40, 10);
+                }
             }
         }
         // Guards come out of the dark ahead of it.
@@ -1255,7 +1613,9 @@ public final class SunkenMonument {
         }
         if (ticks % 40 == 0) for (ServerPlayer p : inside(run)) if (run.layout.inPassage(p.getX(), p.getY(), p.getZ()))
             Announce.actionBar(p, "§6Diving bell: §f" + Math.round(100.0 * (run.bellU - SunkenMap.BELL_START) / (SunkenMap.BELL_END - SunkenMap.BELL_START)) + "% §7of the way"
+                    + " §8| §bair " + Math.round(100 * run.bellAir / Math.max(1, run.bellAirMax)) + "%"
                     + (pushers == 0 ? " §8(stand behind it to push)" : " §8(" + pushers + " pushing)"));
+        if (run.bar != null) run.bar.setName(Component.literal("§6Wren's Diving Bell §8| §bair " + Math.round(100 * run.bellAir / Math.max(1, run.bellAirMax)) + "%"));
         if (run.bellU >= SunkenMap.BELL_END) bossRises(l, run);
     }
 
@@ -1267,7 +1627,7 @@ public final class SunkenMonument {
         run.bellLost = true;
         BlockPos c = run.layout.bellPos(run.bellU);
         l.playSound(null, c, SoundEvents.GLASS_BREAK, SoundSource.BLOCKS, 2f, 0.5f);
-        for (ServerPlayer p : inside(run)) Announce.title(p, "§c§lTHE BELL IS LOST", "§7No vault haul this time - you can still beat the Tidemother", 5, 70, 10);
+        for (ServerPlayer p : inside(run)) Announce.title(p, "§c§lTHE BELL IS LOST", "§7No vault haul - and no air from it. You can still beat the Tidemother", 5, 70, 10);
         if (!run.bossUp) bossRises(l, run); // no bell to push: she comes anyway
     }
 
@@ -1276,6 +1636,10 @@ public final class SunkenMonument {
     private static void bossRises(ServerLevel l, Run run) {
         if (run.bossUp) return;
         run.bossUp = true;
+        // Wren's last reserve: the bell's tank is topped up, and the vault's two vents start working.
+        run.bellAir = run.bellAirMax;
+        int puffs = ventPuffs(run);
+        for (BlockPos v : run.layout.vaultVents) run.vents.put(v.asLong(), new int[]{puffs, puffs});
         Mob boss = EntityTypes.ELDER_GUARDIAN.create(l, EntitySpawnReason.EVENT);
         if (boss == null) return;
         BlockPos at = run.layout.bossSpot;
@@ -1295,6 +1659,7 @@ public final class SunkenMonument {
         run.nextHelpers = ticks + HELPERS_EVERY * 20L;
         for (ServerPlayer p : inside(run)) {
             Announce.title(p, "§3§lTHE TIDEMOTHER RISES", "§7Hide behind the pillars when she charges her beam", 10, 70, 20);
+            Lobby.msg(p, "§6[Captain Wren] §fI've pumped the last of the air into the bell - §7and the two §dvents §7behind the vault's pillars just opened. Make it count!");
             p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.ELDER_GUARDIAN_CURSE, SoundSource.HOSTILE, 1f, 0.8f);
         }
     }
@@ -1302,10 +1667,7 @@ public final class SunkenMonument {
     private static void bossTick(ServerLevel l, Run run) {
         Entity e = run.boss == null ? null : l.getEntity(run.boss);
         if (e == null || !e.isAlive()) return;
-        // Breathing near the bell still works in the vault.
         if (!run.bellLost) {
-            Vec3 bc = Vec3.atCenterOf(run.layout.bellPos(run.bellU));
-            for (ServerPlayer p : inside(run)) if (p.distanceToSqr(bc) <= 5.5 * 5.5) p.addEffect(new MobEffectInstance(MobEffects.WATER_BREATHING, 60, 0, false, false));
             int hits = l.getEntitiesOfClass(Mob.class, new AABB(run.layout.bellPos(run.bellU)).inflate(3), m -> m.entityTags().contains(GUARD_TAG) && m != e).size();
             if (hits > 0) damageBell(l, run, 2.0 * hits);
         }
@@ -1317,11 +1679,21 @@ public final class SunkenMonument {
                 p.level().playSound(null, e.getX(), e.getY(), e.getZ(), SoundEvents.GUARDIAN_ATTACK, SoundSource.HOSTILE, 2f, 0.5f);
             }
         }
+        // 5.25: helpers - at most HELPER_CAP alive (+1 per extra player), and none while that many are up.
         if (ticks >= run.nextHelpers) {
             run.nextHelpers = ticks + HELPERS_EVERY * 20L;
-            for (int i = 0; i < 2; i++) spawnGuard(l, run, EntityTypes.GUARDIAN, BlockPos.containing(e.getX() + RNG.nextInt(7) - 3, e.getY(), e.getZ() + RNG.nextInt(7) - 3), null);
+            run.helpers.removeIf(id -> {
+                Entity h = l.getEntity(id);
+                return h == null || !h.isAlive();
+            });
+            int room = HELPER_CAP + (run.crewSize - 1) - run.helpers.size();
+            for (int i = 0; i < Math.min(2, room); i++) {
+                Mob m = spawnGuard(l, run, EntityTypes.GUARDIAN, BlockPos.containing(e.getX() + RNG.nextInt(7) - 3, e.getY(), e.getZ() + RNG.nextInt(7) - 3), null);
+                if (m != null) run.helpers.add(m.getUUID());
+            }
         }
-        if (run.bar != null) run.bar.setName(Component.literal("§6Wren's Diving Bell §8| §3The Tidemother §f" + Math.round(((Mob) e).getHealth()) + "❤"));
+        if (run.bar != null) run.bar.setName(Component.literal("§6Wren's Diving Bell §8| §bair " + Math.round(100 * run.bellAir / Math.max(1, run.bellAirMax)) + "% §8| §3The Tidemother §f"
+                + Math.round(((Mob) e).getHealth()) + "❤"));
     }
 
     /** The charged beam: everyone in the vault she can see takes the hit. The bell too, if she can see it. */
@@ -1365,60 +1737,64 @@ public final class SunkenMonument {
     // 5.21: op test mode (/sunken admin test <difficulty> [crew])
     // =====================================================================
 
-    /** Starts a test trip for this op right away: no fare, no ship room, no muster, no rewards. */
-    static void startTest(ServerPlayer p, int d, int crew) {
-        if (runOf(p.getUUID()) != null || musterOf(p.getUUID()) != null) {
-            Lobby.msg(p, "§7You're already on a Sunken Monument trip (/sunken admin end).");
-            return;
-        }
+    /**
+     * 5.25 (ExpeditionTest, /ss test sunken): a test trip for these players right away - no fare, no ship room, no
+     * muster, no rewards. Returns null if it started, or why not.
+     */
+    static String startTest(List<ServerPlayer> crew, int d) {
+        for (ServerPlayer p : crew)
+            if (runOf(p.getUUID()) != null || musterOf(p.getUUID()) != null) return p.getName().getString() + " is already on a Sunken Monument trip.";
         ServerLevel l = level();
-        if (l == null) {
-            Lobby.msg(p, "§cThe Sunken Monument world isn't loaded.");
-            return;
-        }
-        Islands.Island is = Islands.islandOf(p.getUUID());
-        Run run = new Run(runCounter++, d, is == null ? -1 : is.id, p.getUUID());
+        if (l == null) return "The Sunken Monument world isn't loaded.";
+        if (RUNS.size() >= MAX_RUNS + 2) return "Too many Sunken Monument trips at once - try again soon.";
+        ServerPlayer lead = crew.get(0);
+        Islands.Island is = Islands.islandOf(lead.getUUID());
+        Run run = new Run(runCounter++, d, is == null ? -1 : is.id, lead.getUUID());
         run.test = true;
-        run.testCrew = Math.max(1, Math.min(CREW_MAX, crew));
-        run.crew.add(p.getUUID());
-        run.crewSize = run.testCrew;
+        for (ServerPlayer p : crew) run.crew.add(p.getUUID());
+        run.crewSize = Math.min(CREW_MAX, crew.size());
         BlockPos center = new BlockPos(2_000 + (run.id % 16) * 300, SunkenMap.FLOOR_Y, 2_000 + (run.id / 16) * 300);
         run.layout = SunkenMap.plan(l, center, run.diff, RNG);
         for (SunkenMap.Current c : run.layout.currents) c.trap = RNG.nextInt(100) < 30;
         run.timeLimit = (int) Math.round(TIME_LIMITS[run.diff] * TIME_MULT[run.crewSize - 1]);
         RUNS.add(run);
-        Lobby.msg(p, "§b[Test] §7Building a " + DIFF_COLORS[d] + DIFF_NAMES[d] + " §7monument scaled for a crew of §f" + run.testCrew + "§7...");
-        Skyserver.LOGGER.info("[Sunken] TEST trip #{} ({}, crew size {}) by {}", run.id, DIFF_NAMES[d], run.testCrew, p.getName().getString());
+        Skyserver.LOGGER.info("[Sunken] TEST trip #{} ({}, crew of {})", run.id, DIFF_NAMES[d], run.crewSize);
+        return null;
     }
 
     private static void testHelp(ServerPlayer p) {
-        Lobby.msg(p, "§b§l[TEST TRIP] §7No fare taken; room chests still give loot (to check it), the clear pays nothing. Op commands: §e/sunken admin skip §7(clear the room you're fighting), "
-                + "§e/sunken admin wing §7(clear the open wing), §e/sunken admin vault §7(open the vault), §e/sunken admin boss §7(the Tidemother now), "
+        Lobby.msg(p, "§b§l[TEST TRIP] §7No fare taken, no rewards (your own inventory comes back when you leave). Op commands: §e/sunken admin skip §7(clear the room you're in), "
+                + "§e/sunken admin wing §7(clear every room of the wing you're in), §e/sunken admin vault §7(open the vault), §e/sunken admin boss §7(the Tidemother now), "
                 + "§e/sunken admin god §7(no damage), §e/sunken admin time <min>§7, §e/sunken admin end§7.");
     }
 
     private static Run testRun(ServerPlayer p) {
         Run run = runOf(p.getUUID());
         if (run == null || !run.test || run.building || run.over) {
-            Lobby.msg(p, "§7That only works on your own test trip (§e/sunken admin test <difficulty> [crew]§7).");
+            Lobby.msg(p, "§7That only works on a test trip (§e/ss test sunken <difficulty> [players]§7).");
             return null;
         }
         return run;
     }
 
-    /** Clears the active room of the open wing (or every room of it with wholeWing). */
+    /** Clears the room the op is in (or every room of that wing with wholeWing). */
     static void testSkip(ServerPlayer p, boolean wholeWing) {
         Run run = testRun(p);
         if (run == null) return;
         ServerLevel l = level();
-        if (run.openWing < 0) {
-            Lobby.msg(p, "§7No wing is open - open a floodgate first (talk to Wren), or use §e/sunken admin vault§7.");
+        SunkenMap.Room here = inRoom(run, p);
+        int wing = here != null ? here.wing : -1;
+        if (wing < 0) {
+            for (SunkenMap.Current c : run.layout.currents) if (c.inside(p.getX(), p.getY() - 7, p.getZ())) wing = c.wing;
+        }
+        if (wing < 0) {
+            Lobby.msg(p, "§7Stand in a room (or a wing's corridor for §e/sunken admin wing§7), or use §e/sunken admin vault§7.");
             return;
         }
         int n = 0;
         for (SunkenMap.Room r : run.layout.rooms) {
-            if (r.wing != run.openWing || r.cleared) continue;
-            if (!wholeWing && !r.active) continue;
+            if (r.wing != wing || r.cleared) continue;
+            if (!wholeWing && r != here) continue;
             for (UUID g : r.guards) {
                 Entity e = l.getEntity(g);
                 if (e != null) e.discard();
@@ -1427,11 +1803,11 @@ public final class SunkenMonument {
             r.guards.clear();
             r.active = true;
             r.wave = 2;
+            r.sealsDone = true;
             roomCleared(l, run, r);
             n++;
-            if (!wholeWing) break;
         }
-        Lobby.msg(p, n == 0 ? "§7No room is being fought right now - walk into one, or use §e/sunken admin wing§7." : "§b[Test] §7Cleared " + n + " room(s).");
+        Lobby.msg(p, n == 0 ? "§7Nothing left to clear there." : "§b[Test] §7Cleared " + n + " room(s).");
     }
 
     /** Opens the vault (marks every wing done), and with boss also raises the Tidemother. */
@@ -1450,11 +1826,11 @@ public final class SunkenMonument {
                 if (!r.cleared) {
                     r.active = true;
                     r.wave = 2;
+                    r.sealsDone = true;
                     roomCleared(l, run, r);
                 }
             }
             run.wingDone[0] = run.wingDone[1] = run.wingDone[2] = true;
-            run.openWing = -1;
             openVault(l, run);
         }
         if (boss && !run.bossUp) bossRises(l, run);
@@ -1487,7 +1863,8 @@ public final class SunkenMonument {
         if (run.test) { // 5.21: test trips pay nothing
             for (ServerPlayer m : inside(run)) {
                 removeSponges(m);
-                Lobby.msg(m, "§b§lTEST CLEAR! §7(" + DIFF_NAMES[d] + ", crew size " + run.crewSize + ", bell " + (run.bellLost ? "lost" : "afloat")
+                removeIdol(m);
+                Lobby.msg(m, "§b§lTEST CLEAR! §7(" + DIFF_NAMES[d] + ", crew of " + run.crewSize + ", bell " + (run.bellLost ? "lost" : "afloat") + ", tide " + TIDE_NAMES[run.tide]
                         + ", " + ((ticks - run.startTick) / 20 / 60) + " min) §8No rewards on a test trip.");
             }
             Lobby.runLaterTicks(5 * 20, () -> Safe.run("sunken test home", () -> {
@@ -1496,14 +1873,20 @@ public final class SunkenMonument {
             }));
             return;
         }
+        // 5.25: the Sunken Idol in the vault = +20% cash for everyone.
+        boolean idol = false;
+        for (ServerPlayer m : inside(run)) if (!DOWNED.containsKey(m.getUUID()) && hasIdol(m) && run.layout.inVault(m.getX(), m.getY(), m.getZ())) idol = true;
         for (ServerPlayer m : inside(run)) {
             if (DOWNED.containsKey(m.getUUID())) continue;
             removeSponges(m);
+            removeIdol(m);
             int cleared = clearsToday(m.getUUID());
             long cash = cleared < FULL_CLEARS ? CASH[d] : Math.round(CASH[d] * CASH_LATER);
+            if (idol) cash = Math.round(cash * (1 + IDOL_BONUS));
             countClear(m.getUUID());
             Economy.add(server, m.getUUID(), m.getName().getString(), cash);
-            StringBuilder got = new StringBuilder("§b§lMONUMENT CLEARED! §7You got §6" + Economy.format(cash) + (cleared >= FULL_CLEARS ? " §8(half: clear " + (cleared + 1) + " today)" : ""));
+            StringBuilder got = new StringBuilder("§b§lMONUMENT CLEARED! §7You got §6" + Economy.format(cash) + (idol ? " §6(+20% for the Sunken Idol!)" : "")
+                    + (cleared >= FULL_CLEARS ? " §8(half: clear " + (cleared + 1) + " today)" : ""));
             int kt = KEY_TIER[d];
             Keys.reward(server, m.getUUID(), kt, 1, "(Sunken Monument)");
             got.append("§7, ").append(Keys.COLORS[kt]).append(Keys.NAMES[kt]).append(" Key");
@@ -1589,29 +1972,12 @@ public final class SunkenMonument {
     }
 
     // =====================================================================
-    // Sponges (they stay in the monument)
+    // Sponges from before 5.25 (they stay in the monument)
     // =====================================================================
-
-    static ItemStack sponge(ItemStack s) {
-        return Stacks.tag(Stacks.named(s, "§e§lWren's Sponge", "§7Soaks up water around it.", "§7Dry it at the furnace in Wren's dock.", "§8Stays in the monument when you leave."), SPONGE_TAG);
-    }
 
     private static void removeSponges(ServerPlayer p) {
         Inventory inv = p.getInventory();
         for (int i = 0; i < inv.getContainerSize(); i++) if (Stacks.is(inv.getItem(i), SPONGE_TAG)) inv.setItem(i, ItemStack.EMPTY);
-    }
-
-    private static void drySponges(ServerPlayer p) {
-        Inventory inv = p.getInventory();
-        int n = 0;
-        for (int i = 0; i < inv.getContainerSize(); i++) {
-            ItemStack s = inv.getItem(i);
-            if (!s.is(Items.WET_SPONGE) || !Stacks.is(s, SPONGE_TAG)) continue;
-            n += s.getCount();
-            inv.setItem(i, sponge(new ItemStack(Items.SPONGE, s.getCount())));
-        }
-        tip(p, n > 0 ? "§aDried " + n + " sponge" + (n == 1 ? "" : "s") + "!" : "§7No wet Wren's Sponges to dry.");
-        if (n > 0) p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.FIRE_EXTINGUISH, SoundSource.BLOCKS, 0.8f, 1.2f);
     }
 
     // =====================================================================
@@ -1653,6 +2019,7 @@ public final class SunkenMonument {
         DOWNED.remove(id);
         PROTECTED.remove(id);
         removeSponges(p);
+        removeIdol(p);
         if (run != null) {
             run.inside.remove(id);
             if (run.bar != null) run.bar.removePlayer(p);
@@ -1698,8 +2065,16 @@ public final class SunkenMonument {
         PROTECTED.remove(id);
         ServerLevel level = (ServerLevel) p.level();
         boolean saved = EndRewards.useCharm(p);
-        if (saved) removeSponges(p);
-        else dropAll(p, level, p.position());
+        if (saved) {
+            removeSponges(p);
+            // The idol stays behind where you fell, even with a charm.
+            if (hasIdol(p)) {
+                removeIdol(p);
+                ItemEntity e = new ItemEntity(level, p.getX(), p.getY() + 0.5, p.getZ(), idol());
+                e.setUnlimitedLifetime();
+                level.addFreshEntity(e);
+            }
+        } else dropAll(p, level, p.position());
         p.setHealth(p.getMaxHealth());
         p.clearFire();
         p.removeAllEffects();
@@ -1738,7 +2113,10 @@ public final class SunkenMonument {
         if (!safe && !EndRewards.useCharm(p)) {
             dropAll(p, (ServerLevel) p.level(), p.position());
             for (ServerPlayer m : inside(run)) if (m != p) Lobby.msg(m, "§c" + p.getName().getString() + " left the monument - their things are where they were.");
-        } else removeSponges(p);
+        } else {
+            removeSponges(p);
+            removeIdol(p);
+        }
         run.inside.remove(p.getUUID());
         if (run.bar != null) run.bar.removePlayer(p);
         sendHome(p, run);
@@ -1922,9 +2300,11 @@ public final class SunkenMonument {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
             if (p != null && isSunken(p.level())) {
                 removeSponges(p);
+                removeIdol(p);
                 sendHome(p, run);
             }
         }
+        if (run.layout != null) for (SunkenMap.Room r : run.layout.rooms) ExpeditionChests.forget(r);
         for (UUID id : run.crew) DOWNED.remove(id);
         if (run.bar != null) run.bar.removeAllPlayers();
         GUARD_OF.entrySet().removeIf(en -> en.getValue()[0] == run);

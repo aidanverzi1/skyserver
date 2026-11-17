@@ -145,6 +145,7 @@ public final class CityMarket {
     /** Pays City Cash (and counts where it came from for /ss economy). */
     static void earn(UUID id, int amount, String source) {
         if (amount <= 0) return;
+        if (ExpeditionTest.isTesting(id)) return; // 5.25: no City Cash on a test trip
         Tokens.add(id, CC, amount);
         stat("earned", source, amount);
     }
@@ -655,7 +656,7 @@ public final class CityMarket {
 
     static final String[] COND_TEXT = {"Escape with the noise meter at 33% or less", "Clean Sweep: loot every real house, open no decoy",
             "Loot the Deep Vault and escape", "Escape within %d minutes", "Break %d urns and escape", "Escape without anyone going down"};
-    static final int[] FAST_MIN = {14, 17, 21, 25}, URN_GOAL = {5, 6, 8, 10};
+    static final int[] FAST_MIN = {11, 14, 17, 20}, URN_GOAL = {3, 4, 5, 6}; // 5.25: scaled to the smaller city
 
     static String condText(Request r) {
         String t = COND_TEXT[r.cond()];

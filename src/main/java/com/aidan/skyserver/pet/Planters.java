@@ -53,8 +53,8 @@ import java.util.UUID;
  *  - Left-click the pie when it's ready: 3 Little Snacks (pies) and it starts again. Left-click early: how long is left.
  *    Crouch + left-click the pie, or break the farmland: the planter goes straight to your inventory (or /claim if
  *    it's full) and keeps its growth.
- *  - The first one comes from Captain Wren's quest (step SNACK_PLANT_STEP; players past it get it the next time they
- *    talk to him). After that, the island can buy a 2nd ($15,000) and a 3rd ($30,000) in the /is menu. Grow-time
+ *  - The first one comes from Captain Wren's quest (step SNACK_PLANT_STEP) - 5.25: only for the island's OWNER (an
+ *    owner past it gets it the next time they talk to him); buying more needs the buyer's own quest past that step. After that, the island can buy a 2nd ($15,000) and a 3rd ($30,000) in the /is menu. Grow-time
  *    upgrades in /is too ($15,000 / $30,000 / $50,000). Both are per island (shared by the crew).
  *  - The pie is an item_display entity, the click box an interaction entity (both summoned by command and tagged).
  *    Their ids are saved, so the same entities are kept when a chunk loads again; anything tagged that isn't ours
@@ -390,11 +390,11 @@ public final class Planters {
 
     /** Talking to Wren: players already past that quest step get the planter now. */
     public static void wrenCatchUp(ServerPlayer p, Islands.Island is) {
-        if (is != null && is.isMember(p.getUUID()) && is.quest > PetItems.SNACK_PLANT_STEP) wrenGift(p);
+        if (is != null && is.owner.equals(p.getUUID()) && com.aidan.skyserver.island.IslandQuests.questOf(p.getUUID()) > PetItems.SNACK_PLANT_STEP) wrenGift(p);
     }
 
     public static String buy(ServerPlayer p, Islands.Island is) {
-        if (is.quest <= PetItems.SNACK_PLANT_STEP) return "§7Finish Captain Wren's quest #" + PetItems.SNACK_PLANT_STEP + " first - he gives you the first planter.";
+        if (com.aidan.skyserver.island.IslandQuests.questOf(p.getUUID()) <= PetItems.SNACK_PLANT_STEP) return "§7Finish your own Captain Wren's quest #" + PetItems.SNACK_PLANT_STEP + " first.";
         int[] d = islandData(is.id);
         if (d[0] >= BUY_PRICES.length) return "§7Your island has bought all the extra planters it can (" + MAX_PER_ISLAND + " in total).";
         long price = BUY_PRICES[d[0]];
@@ -415,13 +415,14 @@ public final class Planters {
         return "§aPlanter upgrade " + d[1] + "! §7Pies now take §f" + (growMs(is.id) / 60_000) + " minutes§7.";
     }
 
-    public static ItemStack buyIcon(Islands.Island is) {
+    public static ItemStack buyIcon(ServerPlayer viewer, Islands.Island is) {
         int[] d = islandData(is.id);
+        boolean locked = com.aidan.skyserver.island.IslandQuests.questOf(viewer.getUUID()) <= PetItems.SNACK_PLANT_STEP; // 5.25: the buyer's own quest
         boolean max = d[0] >= BUY_PRICES.length;
         return Stacks.named(new ItemStack(Items.PUMPKIN_PIE), "§2§lLittle Snack Planter",
                 "§7Grows pies (Little Snacks) for your chicken.", "§7Your island has bought §f" + d[0] + "§7/" + BUY_PRICES.length + " extra (max " + MAX_PER_ISLAND + " placed).",
-                is.quest <= PetItems.SNACK_PLANT_STEP ? "§cFirst one: Captain Wren's quest #" + PetItems.SNACK_PLANT_STEP : max ? "§a(all bought)" : "§7Price: §6" + Economy.format(BUY_PRICES[d[0]]),
-                max || is.quest <= PetItems.SNACK_PLANT_STEP ? "" : "§eClick to buy");
+                locked ? "§cFirst: your Captain Wren's quest #" + PetItems.SNACK_PLANT_STEP : max ? "§a(all bought)" : "§7Price: §6" + Economy.format(BUY_PRICES[d[0]]),
+                max || locked ? "" : "§eClick to buy");
     }
 
     public static ItemStack upgradeIcon(Islands.Island is) {

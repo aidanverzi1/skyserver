@@ -21,7 +21,7 @@ import java.util.function.Predicate;
 /**
  * 5.20: the three TRIBUTE CHESTS in Captain Wren's ship room - where players put the items that pay for a
  * Sunken Monument Expedition (iron, copper, coal, redstone, cooked chicken, wool, seeds, wheat, carrots,
- * dried kelp blocks, pumpkins, sugar cane, and diamonds for Nightmare).
+ * dried kelp blocks, pumpkins and sugar cane; 5.25: Easy 64 each, Normal 128, Hard 216, Nightmare 384 - scaled to the cash).
  *
  *  - Every chest has one slot per item. Click an item in your own inventory to put it in; click a slot to
  *    take back a stack (shift: all of it). "Put in everything" moves all of them at once.
@@ -50,8 +50,16 @@ public final class Tribute {
         }
     }
 
+    /**
+     * 5.25: Easy's fare stays the same; harder fares grow with the clear cash (SunkenMonument.CASH: $7,500 / $15,000 /
+     * $25,000 / $45,000 = x1 / x2 / x3.33 / x6), rounded to a multiple of 8.
+     */
+    static final double[] FARE_SCALE = {1, 2, 10 / 3.0, 6};
+
     private static int[] steps(int per) {
-        return new int[]{per, per * 2, per * 3, per * 4};
+        int[] out = new int[4];
+        for (int d = 0; d < 4; d++) out[d] = (int) (Math.round(per * FARE_SCALE[d] / 8.0) * 8);
+        return out;
     }
 
     private static boolean idEnds(Item i, String suffix) {
@@ -72,8 +80,8 @@ public final class Tribute {
             new Need("carrot", "Carrots", Items.CARROT, i -> i == Items.CARROT, steps(64)),
             new Need("kelp", "Dried Kelp Blocks", Items.DRIED_KELP_BLOCK, i -> i == Items.DRIED_KELP_BLOCK, steps(16)),
             new Need("pumpkin", "Pumpkins", Items.PUMPKIN, i -> i == Items.PUMPKIN, steps(32)),
-            new Need("cane", "Sugar Cane", Items.SUGAR_CANE, i -> i == Items.SUGAR_CANE, steps(64)),
-            new Need("diamond", "Diamonds", Items.DIAMOND, i -> i == Items.DIAMOND, new int[]{0, 0, 0, 16}));
+            new Need("cane", "Sugar Cane", Items.SUGAR_CANE, i -> i == Items.SUGAR_CANE, steps(64)));
+            // 5.25: Nightmare's 16 diamonds are gone - every fare is now the same farm items, scaled to the cash.
 
     /** island -> chest -> player -> item id -> count */
     private static final Map<Integer, Map<Integer, Map<UUID, Map<String, Integer>>>> DATA = new HashMap<>();

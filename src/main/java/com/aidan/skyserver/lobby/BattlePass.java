@@ -114,6 +114,7 @@ public final class BattlePass {
     /** Something happened (same event names as daily quests). Counts toward every open week's challenges. */
     public static void event(ServerPlayer p, String key, int amount) {
         if (p == null || amount <= 0 || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(p.getUUID())) return; // 5.25: no rewards on a test trip
         load();
         PlayerProfile prof = PlayerCache.get(p);
         sync(prof);
@@ -174,6 +175,7 @@ public final class BattlePass {
 
     public static void addPassXp(ServerPlayer p, int amount) {
         if (p == null || amount <= 0 || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(p.getUUID())) return; // 5.25: no rewards on a test trip
         load();
         PlayerProfile prof = PlayerCache.get(p);
         sync(prof);

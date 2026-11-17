@@ -125,6 +125,8 @@ public final class EndExpedition {
         final Set<Integer> chosen = new LinkedHashSet<>(), active = new LinkedHashSet<>();
         /** Void Fragments per guard this wave (keeps the per-wave total the same with more guards). */
         double fragScale = 1.0;
+        /** 5.25: an op's test trip (/ss test end): no price, no rewards, no Strongbox (ExpeditionTest). */
+        boolean test = false;
 
         Run(UUID leader, int islandId, int slot) {
             this.leader = leader;
@@ -668,6 +670,32 @@ public final class EndExpedition {
         }
     }
 
+    /** 5.25 (ExpeditionTest): a test trip for these players right away. Null = started, else why not. */
+    static String startTest(List<ServerPlayer> crew) {
+        for (ServerPlayer p : crew) if (onTrip(p.getUUID())) return p.getName().getString() + " is already on an End trip.";
+        int slot = freeSlot();
+        if (slot < 0) return "Both End islands are in use - try again soon.";
+        ServerLevel l = server.getLevel(DIMS[slot]);
+        if (l == null) return "The End Expedition world isn't loaded.";
+        ServerPlayer lead = crew.get(0);
+        Islands.Island is = Islands.islandOf(lead.getUUID());
+        Run run = new Run(lead.getUUID(), is == null ? -1 : is.id, slot);
+        run.test = true;
+        for (ServerPlayer p : crew) {
+            run.crew.add(p.getUUID());
+            run.paidWithTicket.put(p.getUUID(), false);
+        }
+        run.crewSize = run.crew.size();
+        run.builder = new EndIsland.Builder(l);
+        RUNS[slot] = run;
+        return null;
+    }
+
+    static boolean onTrip(UUID id) {
+        for (Run r : RUNS) if (r != null && !r.over && r.crew.contains(id)) return true;
+        return false;
+    }
+
     /** The island is ready: the crew lands on Wren's Pad. */
     private static void arrive(Run run) {
         ServerLevel l = level(run);
@@ -691,7 +719,7 @@ public final class EndExpedition {
         for (UUID id : run.crew) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
             if (p == null || !Islands.isIsland(p.level())) {
-                refund(id, run.paidWithTicket.getOrDefault(id, false));
+                if (!run.test) refund(id, run.paidWithTicket.getOrDefault(id, false));
                 continue;
             }
             p.teleportTo(l, at[0], at[1], at[2], Set.of(), (float) at[3], 0f, true);
@@ -813,6 +841,10 @@ public final class EndExpedition {
     static void strongbox(ServerPlayer p) {
         Run run = runOf(p.getUUID());
         if (run == null || DOWNED.containsKey(p.getUUID())) return;
+        if (run.test) {
+            Lobby.msg(p, "§7No Strongbox on a test trip (nothing goes home from a test).");
+            return;
+        }
         if (!run.strongbox || fighting(run)) {
             Lobby.msg(p, "§7Wren's Strongbox only opens after every 10th wave (until the next wave starts).");
             return;

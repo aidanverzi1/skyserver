@@ -95,8 +95,8 @@ public final class Skills {
         String[][] m = Mine.UNLOCK_TEXT;
         for (String[] u : m) UNLOCKS.put("MINING:" + u[0], u[1]);
         for (TownDesign.Area a : TownDesign.AREAS) if (a.skill() != null) UNLOCKS.merge(a.skill() + ":" + a.level(), "the " + a.name() + " in the lobby", (x, y) -> x + ", " + y);
-        for (int l = Activities.FISH_SKILL_BONUS_LEVELS, b = 1; b <= Activities.FISH_SKILL_BONUS_MAX; l += Activities.FISH_SKILL_BONUS_LEVELS, b++)
-            UNLOCKS.merge("FISHING:" + l, "+$" + b + " per fish at the lobby pond", (x, y) -> x + ", " + y);
+        for (int l = Activities.FISH_BITE_LEVELS; l <= Activities.FISH_BITE_LEVELS * Activities.FISH_BITE_MAX_STEPS; l += Activities.FISH_BITE_LEVELS)
+            UNLOCKS.merge("FISHING:" + l, "fish bite " + Activities.fishBitePercent(l) + "% sooner (pond and island)", (x, y) -> x + ", " + y);
     }
 
     private static final Map<UUID, long[]> XP = new HashMap<>();          // per skill
@@ -216,6 +216,7 @@ public final class Skills {
     }
 
     private static void grant(ServerPlayer p, Skill s, double scaledIn) {
+        if (com.aidan.skyserver.expedition.ExpeditionTest.isTesting(p.getUUID())) return; // 5.25: no skill XP on a test trip
         load();
         UUID id = p.getUUID();
         // Small amounts keep their leftover fraction for next time.
