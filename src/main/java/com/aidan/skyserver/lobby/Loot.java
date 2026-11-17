@@ -157,6 +157,16 @@ public final class Loot {
         return out;
     }
 
+    /** 5.24: adds one prize at exactly 1% (every other weight x99, the extra one gets the old total). */
+    private static List<Prize> onePercent(List<Prize> t, Prize extra) {
+        int total = 0;
+        for (Prize p : t) total += p.weight();
+        List<Prize> out = new ArrayList<>();
+        for (Prize p : t) out.add(new Prize(p.weight() * 99, p.kind(), p.label(), p.money(), p.keyTier(), p.keyCount(), p.item(), p.icon(), p.token()));
+        out.add(new Prize(total, extra.kind(), extra.label(), extra.money(), extra.keyTier(), extra.keyCount(), extra.item(), Items.LEATHER_CHESTPLATE, extra.token()));
+        return out;
+    }
+
     private static List<Prize> table(Object... parts) {
         List<Prize> out = new ArrayList<>();
         for (Object o : parts) {
@@ -213,9 +223,10 @@ public final class Loot {
                 token(6, "§b60 min +50% XP Booster", "booster:xp:60:50", Items.EXPERIENCE_BOTTLE),
                 token(6, "§9Rare cosmetic", "cosmetic:1", Items.NAME_TAG),
                 token(6, "§cEasy Nether Expedition Ticket", "ticket:0", Items.MAP),
+                token(4, "§3Easy Ancient City Ticket", "cityticket:0", Items.SCULK), token(4, "§bEasy Sunken Monument Ticket", "sunkenticket:0", Items.PRISMARINE_SHARD), // 5.24c
                 keys(3, 3, 1), keys(5, 1, 2)));
         // ---- Epic ($25,000) ---- (5.18: armour + an extra-level book; End ticket instead of the Elytra; no Shulker Box)
-        TABLES.add(table(
+        TABLES.add(onePercent(table(
                 money(14, 10_000),
                 token(7, "§5End Expedition Ticket", "endticket", Items.END_STONE),
                 stack(7, Items.NETHERITE_INGOT, 1),
@@ -225,11 +236,12 @@ public final class Loot {
                 token(8, "§dIsland Upgrade Voucher (25% off)", "upgrade_voucher", Items.FILLED_MAP),
                 token(6, "§aIsland Theme", "theme", Items.GRASS_BLOCK),
                 token(6, "§9Rare cosmetic", "cosmetic:1", Items.NAME_TAG),
-                token(5, "§cHard Nether Expedition Ticket", "ticket:2", Items.MAP),
+                token(5, "§eNormal Nether Expedition Ticket", "ticket:1", Items.MAP), // 5.24c: Epic = Normal tickets (was Hard)
+                token(4, "§3Normal Ancient City Ticket", "cityticket:1", Items.SCULK), token(4, "§bNormal Sunken Monument Ticket", "sunkenticket:1", Items.PRISMARINE_SHARD),
                 token(5, "§660 min +50% Money Booster", "booster:money:60:50", Items.GOLD_INGOT),
-                keys(2, 4, 1), keys(5, 2, 2)));
+                keys(2, 4, 1), keys(5, 2, 2)), item(1, "§eFeather Plate §7(chicken armour)", s -> com.aidan.skyserver.pet.PetItems.featherPlate()))); // 5.24: exactly 1%
         // ---- Legendary ($60,000) ---- (the only chest with monster spawners; 5.18: netherite armour + a top-level book)
-        TABLES.add(table(
+        TABLES.add(onePercent(table(
                 money(12, 35_000),
                 item(8, "Netherite Pickaxe (Fortune III, Efficiency V, Unbreaking III)",
                         enchanted(Items.NETHERITE_PICKAXE, Enchantments.FORTUNE, 3, Enchantments.EFFICIENCY, 5, Enchantments.UNBREAKING, 3)),
@@ -242,10 +254,12 @@ public final class Loot {
                 spawner(3, "minecraft:creeper", "Creeper"), spawner(2, "minecraft:blaze", "Blaze"),
                 token(6, "§d§lServer Money Booster (+50%, 60 min)", "booster:server:60:50", Items.NETHER_STAR),
                 token(6, "§6Legendary cosmetic", "cosmetic:2", Items.NAME_TAG),
-                token(5, "§4Nightmare Nether Expedition Ticket", "ticket:3", Items.MAP),
+                token(3, "§cHard Nether Expedition Ticket", "ticket:2", Items.MAP), token(2, "§4Nightmare Nether Expedition Ticket", "ticket:3", Items.MAP), // 5.24c
+                token(3, "§3Hard Ancient City Ticket", "cityticket:2", Items.SCULK), token(2, "§3Nightmare Ancient City Ticket", "cityticket:3", Items.SCULK),
+                token(3, "§bHard Sunken Monument Ticket", "sunkenticket:2", Items.PRISMARINE_SHARD), token(2, "§bNightmare Sunken Monument Ticket", "sunkenticket:3", Items.PRISMARINE_SHARD),
                 item(4, "Longbow (3.5s full-charge beam)", Longbow::create),
                 item(4, "Fire Wand (fireball launcher)", s -> FireWand.create()),
-                keys(4, 3, 2)));
+                keys(4, 3, 2)), item(1, "§6Gilded Feather Plate §7(chicken armour)", s -> com.aidan.skyserver.pet.PetItems.gildedPlate()))); // 5.24: exactly 1%
     }
 
     /** 5.18: extra items, including the random book that comes with Epic / Legendary armour. */

@@ -519,7 +519,8 @@ public final class CityMarket {
     /** Allowance groups: {units at list price per week, most units per week}. */
     private static final Map<String, int[]> ALLOW = Map.of(
             "diamond", new int[]{16, 32}, "gapple", new int[]{8, 16}, "xp", new int[]{64, 128}, "keyshard", new int[]{50, 100},
-            "book", new int[]{2, 4}, "mending", new int[]{1, 1}, "egapple", new int[]{1, 1});
+            "book", new int[]{2, 4}, "mending", new int[]{1, 1}, "egapple", new int[]{1, 1},
+            "plate", new int[]{1, 1}, "gplate", new int[]{1, 1}); // 5.24: chicken armour, 1 of each a week
 
     /**
      * One thing Ves sells. units = how many count toward the allowance group per purchase. unlock: null, or a
@@ -591,6 +592,11 @@ public final class CityMarket {
         }
         l.add(o(32, "§d§lMending Book", 10_000, 6, "mending", 1, "city_2", p -> book(p, Enchantments.MENDING, 1), Items.ENCHANTED_BOOK, "§71 a week."));
         l.add(o(33, "§6§lEnchanted Golden Apple", 1_500, 0, "egapple", 1, "city_2", p -> new ItemStack(Items.ENCHANTED_GOLDEN_APPLE), Items.ENCHANTED_GOLDEN_APPLE, "§71 a week."));
+        // 5.24: chicken armour (1 of each a week; Feather after a Hard escape, Gilded after a Nightmare escape)
+        l.add(o(34, "§eFeather Plate §7(chicken armour)", 10_000, 0, "plate", 1, "city_2", p -> com.aidan.skyserver.pet.PetItems.featherPlate(), Items.LEATHER_CHESTPLATE,
+                "§7Your chicken takes §f18% §7less damage.", "§71 a week."));
+        l.add(o(35, "§6Gilded Feather Plate §7(chicken armour)", 25_000, 0, "gplate", 1, "city_3", p -> com.aidan.skyserver.pet.PetItems.gildedPlate(), Items.GOLDEN_CHESTPLATE,
+                "§7Your chicken takes §f25% §7less damage.", "§71 a week."));
         return l;
     }
 

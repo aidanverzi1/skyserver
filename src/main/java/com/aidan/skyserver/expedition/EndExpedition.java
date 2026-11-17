@@ -458,6 +458,7 @@ public final class EndExpedition {
     }
 
     private static boolean ours(Entity e) {
+        if (com.aidan.skyserver.pet.Companion.isPet(e)) return true; // 5.24: players' chickens
         Run run = runIn(e.level());
         if (e.entityTags().contains(WREN_TAG)) return run != null && e.getUUID().equals(run.wren);
         if (run == null) return false;

@@ -527,6 +527,7 @@ public final class Islands {
         ISLAND_OF.put(p.getUUID(), is.id);
         OWNS.put(p.getUUID(), is.id);
         Safe.run("ship room", () -> WrenRoom.buildDefault(level, is)); // 5.20: Captain Wren's ship room
+        Safe.run("island chicken", () -> com.aidan.skyserver.pet.Companion.grant(p.getUUID(), p.getName().getString(), true)); // 5.24
         save();
         Skyserver.LOGGER.info("Built Sky Island #{} for {} at {}, {}", is.id, is.ownerName, cx, cz);
         return is;
@@ -1241,12 +1242,18 @@ public final class Islands {
         Lobby.msg(p, "§aWarped to §f" + name.toLowerCase(Locale.ROOT) + "§a.");
     }
 
+    /** 5.24b: the generator item (bought, or picked back up). */
+    public static ItemStack generatorItem() {
+        return Stacks.named(new ItemStack(Items.LODESTONE), "§bIsland Generator", "§7Place it and cobblestone (or ore) appears", "§7on top. Mine it and it grows back.",
+                "§8Breaking it puts it back in your inventory.");
+    }
+
     public static String buyExtraGenerator(ServerPlayer p) {
         Island own = islandOf(p.getUUID());
         if (own != null && own.gens.size() >= MAX_GENERATORS)
             return "§cYour island already has " + MAX_GENERATORS + " working generators (the most allowed).";
         if (!Economy.take(server, p.getUUID(), EXTRA_GENERATOR_PRICE)) return "§cThat costs " + Economy.format(EXTRA_GENERATOR_PRICE) + ".";
-        ItemStack gen = Stacks.named(new ItemStack(Items.LODESTONE), "§bIsland Generator", "§7Place it and cobblestone (or ore) appears", "§7on top. Mine it and it grows back.");
+        ItemStack gen = generatorItem();
         if (!p.getInventory().add(gen)) p.spawnAtLocation((ServerLevel) p.level(), gen);
         return "§aBought an Island Generator! §7Place it anywhere on your island.";
     }
@@ -1371,6 +1378,12 @@ public final class Islands {
             if (state.is(Blocks.LODESTONE)) {
                 Island gi = islandAt(pos.getX(), pos.getZ());
                 if (gi != null && gi.gens.remove(pos.asLong())) dirty = true;
+                // 5.24b: a broken generator goes straight to the inventory (or /claim); its upgrades belong to the island.
+                if (player instanceof ServerPlayer gp && !gp.isCreative()) {
+                    for (net.minecraft.world.entity.item.ItemEntity ie : level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                            new net.minecraft.world.phys.AABB(pos).inflate(1.5), x -> x.getItem().is(Items.LODESTONE) && x.tickCount <= 2)) ie.discard();
+                    com.aidan.skyserver.pet.Planters.giveOrClaim(gp, generatorItem());
+                }
             }
             if (state.is(Blocks.SPAWNER)) {
                 Island si = islandAt(pos.getX(), pos.getZ());

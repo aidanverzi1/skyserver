@@ -198,6 +198,7 @@ public final class IslandQuests {
                     + (WrenRoom.hasRoom(is) ? " If you're sailing with this crew, the Tribute Chests are at the back." : ""));
             return;
         }
+        com.aidan.skyserver.Safe.run("wren planter catch-up", () -> com.aidan.skyserver.pet.Planters.wrenCatchUp(p, is)); // 5.24b
         if (is.herd && is.quest != 0) {
             WrenMenu.open(p);
             return;
@@ -419,6 +420,7 @@ public final class IslandQuests {
         Lobby.msg(p, "§a+" + Economy.format(s.money) + " §7(quest " + is.quest + " done)");
         Levels.addXp(server, p, s.xp);
         if (s.keyTier >= 0) Keys.reward(server, p.getUUID(), s.keyTier, 1, "(Captain Wren's quest)");
+        if (is.quest == com.aidan.skyserver.pet.PetItems.SNACK_PLANT_STEP) com.aidan.skyserver.Safe.run("wren snack plant", () -> com.aidan.skyserver.pet.PetItems.wrenPlant(p)); // 5.24
         com.aidan.skyserver.lobby.Skills.add(p, com.aidan.skyserver.lobby.Skills.Skill.BUILDING, 40);
         com.aidan.skyserver.lobby.BattlePass.event(p, "wren_quest", 1);
         p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 1f, 1.2f);

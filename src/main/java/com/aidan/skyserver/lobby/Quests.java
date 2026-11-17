@@ -126,6 +126,7 @@ public final class Quests {
             if (bonus) {
                 d.addProperty("bonus", true);
                 Keys.reward(server, p.getUUID(), 0, 1, "(all 3 daily quests done!)");
+                com.aidan.skyserver.Safe.run("quest treat", () -> com.aidan.skyserver.pet.PetItems.questTreat(p)); // 5.24
             }
             final boolean allThree = bonus;
             com.aidan.skyserver.Safe.run("pass daily", () -> BattlePass.dailyQuestDone(p, allThree));

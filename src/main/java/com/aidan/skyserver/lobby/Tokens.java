@@ -27,6 +27,9 @@ public final class Tokens {
     public static final String[] TICKET = {"ticket_0", "ticket_1", "ticket_2", "ticket_3"};
     /** 5.18: a free place on the End Expedition. */
     public static final String END_TICKET = "ticket_end";
+    /** 5.24c: free-trip tickets for the Ancient City and the Sunken Monument, one per difficulty. */
+    public static final String[] CITY_TICKET = {"ticket_city_0", "ticket_city_1", "ticket_city_2", "ticket_city_3"};
+    public static final String[] SUNKEN_TICKET = {"ticket_sunken_0", "ticket_sunken_1", "ticket_sunken_2", "ticket_sunken_3"};
 
     private static final Map<UUID, Map<String, Integer>> DATA = new HashMap<>();
     private static boolean loaded = false;
@@ -124,6 +127,16 @@ public final class Tokens {
                 int d = Integer.parseInt(t[1]);
                 add(p.getUUID(), TICKET[d], 1);
                 return "§c" + DIFF_NAMES[d] + " Nether Expedition Ticket §7(use it from §e/is §7- a free trip)";
+            }
+            case "cityticket" -> {
+                int d = Integer.parseInt(t[1]);
+                add(p.getUUID(), CITY_TICKET[d], 1);
+                return "§3" + DIFF_NAMES[d] + " Ancient City Ticket §7(a free trip - Wren uses it instead of money or City Cash)";
+            }
+            case "sunkenticket" -> {
+                int d = Integer.parseInt(t[1]);
+                add(p.getUUID(), SUNKEN_TICKET[d], 1);
+                return "§b" + DIFF_NAMES[d] + " Sunken Monument Ticket §7(a free trip - Wren uses it instead of the farm-item fare)";
             }
             case "passxp" -> {
                 int n = Integer.parseInt(t[1]);

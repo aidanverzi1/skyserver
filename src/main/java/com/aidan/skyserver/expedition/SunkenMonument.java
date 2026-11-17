@@ -165,6 +165,8 @@ public final class SunkenMonument {
         final Set<Long> placed = new HashSet<>();
         final Map<Long, Boolean> sponges = new HashMap<>(); // placed sponge -> was it ours (tagged)
         final Map<UUID, Map<String, Integer>> fares = new HashMap<>();
+        /** 5.24c: crew who came on a free ticket. */
+        final Set<UUID> ticket = new HashSet<>();
         final Map<UUID, Long> pumpUsed = new HashMap<>();
         final Map<UUID, Integer> plugging = new HashMap<>();
         SunkenMap.Layout layout;
@@ -480,7 +482,9 @@ public final class SunkenMonument {
                 lore.add("§7Time: §f" + (TIME_LIMITS[d] / 60) + " minutes §8(more with a crew)");
                 lore.add("§7Cash on a clear: §6" + Economy.format(CASH[d]) + " §8(half after 2 clears a day)");
                 lore.add("§7Vault: Tide trim §f" + TIDE_CHANCE[d] + "%§7, heart of the sea §f" + HEART_CHANCE[d] + "%" + (CONDUIT_CHANCE[d] > 0 ? "§7, conduit §f" + CONDUIT_CHANCE[d] + "%" : ""));
-                lore.add(Tribute.ready(island, viewer.getUUID(), d) ? "§aYour fare is ready - click to set sail!" : "§cPut the missing items in the Tribute Chests");
+                int tk = Tokens.count(viewer.getUUID(), Tokens.SUNKEN_TICKET[d]);
+                lore.add(tk > 0 ? "§bFree ticket x" + tk + " §7- used instead of the fare. Click to set sail!"
+                        : Tribute.ready(island, viewer.getUUID(), d) ? "§aYour fare is ready - click to set sail!" : "§cPut the missing items in the Tribute Chests");
                 box.setItem(DIFFS[d], Stacks.named(new ItemStack(icons[d]), DIFF_COLORS[d] + "§l" + DIFF_NAMES[d], lore.toArray(new String[0])));
             }
             box.setItem(HELP, Stacks.named(new ItemStack(Items.BOOK), "§fHow it works", "§7Click for the rules in chat."));
@@ -516,6 +520,10 @@ public final class SunkenMonument {
     }
 
     private static boolean fareReady(ServerPlayer p, int island, int d) {
+        if (Tokens.count(p.getUUID(), Tokens.SUNKEN_TICKET[d]) > 0) {
+            Lobby.msg(p, "§bWren will take your free " + DIFF_NAMES[d] + " Sunken Monument ticket instead of the fare.");
+            return true;
+        }
         List<String> miss = Tribute.missing(island, p.getUUID(), d);
         if (miss.isEmpty()) return true;
         Lobby.msg(p, "§6[Captain Wren] §fThe fare's short, captain! §7Put these in the ship room's Tribute Chests:");
@@ -632,7 +640,11 @@ public final class SunkenMonument {
                 if (m != null) Lobby.msg(m, "§7You weren't in the ship room when the crew left - you stay behind (your fare wasn't taken).");
                 continue;
             }
-            Map<String, Integer> fare = Tribute.take(mu.islandId, id, mu.diff);
+            Map<String, Integer> fare;
+            if (Tokens.take(id, Tokens.SUNKEN_TICKET[mu.diff], 1)) { // 5.24c: a free ticket instead of the fare
+                fare = new HashMap<>();
+                run.ticket.add(id);
+            } else fare = Tribute.take(mu.islandId, id, mu.diff);
             if (fare == null) {
                 Lobby.msg(m, "§cYour fare isn't all in the Tribute Chests any more - you stay behind.");
                 continue;
@@ -681,6 +693,11 @@ public final class SunkenMonument {
         for (UUID id : run.crew) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
             if (p == null || (!run.test && !Islands.isIsland(p.level()))) {
+                if (run.ticket.remove(id)) {
+                    Tokens.add(id, Tokens.SUNKEN_TICKET[run.diff], 1);
+                    if (p != null) Lobby.msg(p, "§7You weren't on your island when the crew dived - your free ticket was given back.");
+                    continue;
+                }
                 if (host != null && !run.test) Tribute.giveBack(run.islandId, id, run.fares.remove(id));
                 if (p != null) Lobby.msg(p, "§7You weren't on your island when the crew dived - your fare is back in the Tribute Chests.");
                 continue;

@@ -545,7 +545,8 @@ public final class AncientCity {
             p.sendSystemMessage(Component.literal("  " + DIFF_COLORS[d] + "§l" + DIFF_NAMES[d] + " ")
                     .append(Expedition.button("§6[" + Economy.format(PRICES[d]) + "]", "/city call " + d, hover))
                     .append(Component.literal(" §7or "))
-                    .append(Expedition.button("§b[" + CityMarket.fmt(PRICES_CC[d]) + " CC]", "/city callcc " + d, hover + " (paid in City Cash)")));
+                    .append(Expedition.button("§b[" + CityMarket.fmt(PRICES_CC[d]) + " CC]", "/city callcc " + d, hover + " (paid in City Cash)"))
+                    .append(Component.literal(Tokens.count(p.getUUID(), Tokens.CITY_TICKET[d]) > 0 ? " §3(free ticket x" + Tokens.count(p.getUUID(), Tokens.CITY_TICKET[d]) + " - used first)" : "")));
         }
         p.sendSystemMessage(Component.literal("  ").append(Expedition.button("§7[How it works]", "/city help", "What happens in the Ancient City"))
                 .append(Component.literal(" ")).append(Expedition.button("§b[Buy a recovery compass " + Economy.format(COMPASS_PRICE) + "]", "/city compass", "Needed to find Wren's rope"))
@@ -602,7 +603,16 @@ public final class AncientCity {
         return true;
     }
 
+    /** 5.24c: players whose place was paid with a free City ticket (given back instead of money if the trip doesn't go). */
+    private static final Set<UUID> PAID_TICKET = new HashSet<>();
+
     private static boolean pay(ServerPlayer p, int d, boolean cc) {
+        PAID_TICKET.remove(p.getUUID());
+        if (Tokens.take(p.getUUID(), Tokens.CITY_TICKET[d], 1)) {
+            PAID_TICKET.add(p.getUUID());
+            Lobby.msg(p, "§3Used your free " + DIFF_NAMES[d] + " Ancient City ticket §7(nothing else was taken).");
+            return true;
+        }
         if (cc) {
             if (CityMarket.spend(p.getUUID(), PRICES_CC[d], "city tickets")) return true;
             Lobby.msg(p, "§cA " + DIFF_NAMES[d] + " place costs " + CityMarket.fmt(PRICES_CC[d]) + " City Cash - you have " + CityMarket.fmt(CityMarket.balance(p.getUUID())) + ".");
@@ -615,6 +625,11 @@ public final class AncientCity {
 
     private static void refund(UUID id, int d, boolean cc) {
         ServerPlayer p = server.getPlayerList().getPlayer(id);
+        if (PAID_TICKET.remove(id)) {
+            Tokens.add(id, Tokens.CITY_TICKET[d], 1);
+            if (p != null) Lobby.msg(p, "§7Your free Ancient City ticket was given back.");
+            return;
+        }
         if (cc) CityMarket.earn(id, PRICES_CC[d], "ticket refund");
         else Economy.add(server, id, p == null ? "" : p.getName().getString(), PRICES[d]);
         if (p != null) Lobby.msg(p, "§7Your Ancient City " + (cc ? "City Cash" : "money") + " was given back.");
@@ -765,6 +780,7 @@ public final class AncientCity {
             p.teleportTo(l, at[0], at[1], at[2], Set.of(), (float) at[3], 0f, true);
             p.resetFallDistance();
             run.inside.add(id);
+            PAID_TICKET.remove(id); // 5.24c: the ticket is spent once they're in
             int have = countTagged(p, RATTLE_TAG);
             if (have < START_RATTLES) EndRewards.give(p, CityMarket.rattles(START_RATTLES - have));
             Announce.title(p, "§3§lTHE ANCIENT CITY", "§7Sneak. Take the relic. Find the rope.", 10, 70, 20);

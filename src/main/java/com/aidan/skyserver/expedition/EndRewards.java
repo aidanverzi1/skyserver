@@ -231,6 +231,7 @@ public final class EndRewards {
             Economy.add(server, p.getUUID(), p.getName().getString(), EndExpedition.MONEY_PER_TEN);
             Lobby.msg(p, "§6+" + Economy.format(EndExpedition.MONEY_PER_TEN) + " §7for reaching wave " + wave + "! §8(already in your account)");
             if (wave == 10 || wave == 20 || wave == 30) com.aidan.skyserver.lobby.Charts.stamp(p, "end_" + wave); // 5.19: Wren's Charts
+            if (wave == 20 || wave == 40) com.aidan.skyserver.Safe.run("end chicken plate", () -> com.aidan.skyserver.pet.PetItems.endWave(p, wave)); // 5.24
             if (wave >= 30 && !Progress.pearl(p.getUUID())) {
                 Progress.setPearl(p.getUUID());
                 give(p, voidwalkerPearl());

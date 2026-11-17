@@ -46,6 +46,8 @@ public class Skyserver implements ModInitializer {
         com.aidan.skyserver.bedwars.BedwarsGame.init();
         com.aidan.skyserver.bedwars.BwVoyage.init();      // 5.13: Voyage twists for Bedwars (after BedwarsGame, before BwForge)
         com.aidan.skyserver.bedwars.BwForge.init();       // 5.12: shared team forges (must come after BedwarsGame)
+        com.aidan.skyserver.pet.Companion.init(); // 5.24: chicken companions
+        com.aidan.skyserver.pet.OldLook.init(); // 5.24: /oldlook (optional 2015 resource pack)
         com.aidan.skyserver.lobby.Shortcuts.init();       // 5.19: short commands (last: a bare /gw /bw /sw must win over the games' own)
         LOGGER.info("SkyServer loaded!");
     }

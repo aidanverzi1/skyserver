@@ -66,6 +66,13 @@ public final class Admin {
                                     return b.buildFuture();
                                 })
                                 .then(Commands.argument("level", IntegerArgumentType.integer(1, Skills.LEGEND_MAX_LEVEL)).executes(Admin::setSkill)))))
+                .then(Commands.literal("ticket").then(Commands.argument("player", StringArgumentType.word())
+                        .then(Commands.argument("expedition", StringArgumentType.word())
+                                .suggests((c, b) -> { for (String x : new String[]{"nether", "end", "city", "sunken"}) b.suggest(x); return b.buildFuture(); })
+                                .executes(c -> giveTicket(c, "easy"))
+                                .then(Commands.argument("difficulty", StringArgumentType.word())
+                                        .suggests((c, b) -> { for (String x : new String[]{"easy", "normal", "hard", "nightmare"}) b.suggest(x); return b.buildFuture(); })
+                                        .executes(c -> giveTicket(c, StringArgumentType.getString(c, "difficulty")))))))
                 .then(Commands.literal("resetisland").then(Commands.argument("player", StringArgumentType.word())
                         .executes(c -> { say(c.getSource(), "§cThis takes away their island (members too). They get a fresh one with /is. Add §fconfirm §cto the end to do it."); return 1; })
                         .then(Commands.literal("confirm").executes(c -> resetIsland(c)))))
@@ -74,6 +81,45 @@ public final class Admin {
                                 .executes(c -> { Events.startDoubleXp(c.getSource().getServer(), IntegerArgumentType.getInteger(c, "hours")); return 1; })))
                         .then(Commands.literal("spleef").then(Commands.argument("minutes", IntegerArgumentType.integer(5, 240))
                                 .executes(c -> { Events.startTournament(c.getSource().getServer(), IntegerArgumentType.getInteger(c, "minutes")); return 1; }))))));
+    }
+
+    /** 5.24c: /ss ticket <player> <nether|end|city|sunken> [easy|normal|hard|nightmare] - a free trip, online or offline. */
+    private static int giveTicket(CommandContext<CommandSourceStack> c, String diff) {
+        CommandSourceStack s = c.getSource();
+        String name = StringArgumentType.getString(c, "player");
+        String exp = StringArgumentType.getString(c, "expedition").toLowerCase(java.util.Locale.ROOT);
+        int d = switch (diff.toLowerCase(java.util.Locale.ROOT)) {
+            case "easy", "0" -> 0;
+            case "normal", "medium", "1" -> 1;
+            case "hard", "2" -> 2;
+            case "nightmare", "3" -> 3;
+            default -> -1;
+        };
+        if (d < 0) {
+            say(s, "§cDifficulty: easy, normal, hard or nightmare.");
+            return 0;
+        }
+        String token, label;
+        switch (exp) {
+            case "nether" -> { token = Tokens.TICKET[d]; label = Tokens.DIFF_NAMES[d] + " Nether Expedition"; }
+            case "end" -> { token = Tokens.END_TICKET; label = "End Expedition"; }
+            case "city", "ancient", "ancientcity" -> { token = Tokens.CITY_TICKET[d]; label = Tokens.DIFF_NAMES[d] + " Ancient City"; }
+            case "sunken", "monument" -> { token = Tokens.SUNKEN_TICKET[d]; label = Tokens.DIFF_NAMES[d] + " Sunken Monument"; }
+            default -> {
+                say(s, "§cExpedition: nether, end, city or sunken.");
+                return 0;
+            }
+        }
+        UUID id = find(s, name);
+        if (id == null) return 0;
+        Tokens.add(id, token, 1);
+        say(s, "§aGave " + name + " a free " + label + " ticket.");
+        ServerPlayer p = s.getServer().getPlayerList().getPlayer(id);
+        if (p != null) {
+            Lobby.msg(p, "§6§lYou got a free " + label + " ticket from an admin! §7Talk to Captain Wren to use it.");
+            Announce.ding(p, 1.5f);
+        }
+        return 1;
     }
 
     private static void say(CommandSourceStack src, String text) {
@@ -91,6 +137,9 @@ public final class Admin {
         say(s, "§e/ss setskill <player> <skill> <level> §7- set one skill (no rewards paid)");
         say(s, "§e/ss event doublexp <hours> §7| §e/ss event spleef <minutes>");
         say(s, "§e/ss mod add <player> §7| §e/ss mod remove <player> §7| §e/ss mod list §7- moderators (they use §e/mod§7)");
+        say(s, "§e/ss givechicken <player|all> §7- 5.24: give island chickens (one each)");
+        say(s, "§e/ss ticket <player> <nether|end|city|sunken> [easy|normal|hard|nightmare] §7- a free trip");
+        say(s, "§e/ss chicken hp <n> §7| §e/ss chicken item <player> <treat|snack|plant|egg|feather|gilded> [n] §7| §e/ss henparty");
     }
 
     /** /ss status and /mod status. */

@@ -495,6 +495,7 @@ public final class Expedition {
     }
 
     private static boolean ours(Mob m) {
+        if (com.aidan.skyserver.pet.Companion.isPet(m)) return true; // 5.24: players' chickens
         return GUARD_OF.containsKey(m.getUUID()) || m.entityTags().contains(GUARD_TAG) || m.entityTags().contains(NETHER_WREN_TAG)
                 || m.entityTags().contains(ExpeditionBarter.PIGLIN_TAG) || m.entityTags().contains(ExpeditionGold.TRAP_TAG);
     }
@@ -2197,7 +2198,8 @@ public final class Expedition {
         // Only our own mobs live on the map - anything else that turns up goes (the safety net; it logs too).
         for (Mob mob : nl.getEntitiesOfClass(Mob.class, new AABB(run.cx - run.half, ExpeditionRooms.SEA_Y - 10, run.cz - run.half,
                 run.cx + run.half, 200, run.cz + run.half), m -> !GUARD_OF.containsKey(m.getUUID()) && !m.entityTags().contains(NETHER_WREN_TAG)
-                && !m.entityTags().contains(ExpeditionBarter.PIGLIN_TAG) && !m.entityTags().contains(ExpeditionGold.TRAP_TAG)))
+                && !m.entityTags().contains(ExpeditionBarter.PIGLIN_TAG) && !m.entityTags().contains(ExpeditionGold.TRAP_TAG)
+                && !com.aidan.skyserver.pet.Companion.isPet(m))) // 5.24: players' chickens stay
             removeStray(mob, mob.entityTags().contains(GUARD_TAG) ? "an old guard nobody owns, found by the sweep" : "found by the sweep");
         // Guards can't get into Wren's Landing either.
         ExpeditionRooms.Room sp = lay.spawn;

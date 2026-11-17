@@ -429,8 +429,8 @@ public final class WrenRoom {
             Lobby.msg(p, "§cStand on your own island to place Captain Wren's ship room.");
             return;
         }
-        if (!is.owner.equals(p.getUUID())) {
-            Lobby.msg(p, "§cOnly the island owner can place or move the ship room.");
+        if (!is.isMember(p.getUUID())) { // 5.24c: co-op members can place / move it too
+            Lobby.msg(p, "§cOnly the island's crew can place or move the ship room.");
             return;
         }
         Direction f = p.getDirection();

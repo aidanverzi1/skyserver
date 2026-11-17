@@ -25,6 +25,7 @@ import java.util.List;
  * boosters & /tip, the End, the Ancient City and Wren's Charts.
  * 5.20: Captain Wren's ship room (/is shiproom) and the Sunken Monument pages; expeditions start with Wren.
  * 5.21: the Ancient City page rewritten (noise meter, rope, compass); new City Cash page (28).
+ * 5.24: chicken pages (29, 30) and /oldlook. 5.24b: Snack Planters.
  */
 public final class Guide {
     private Guide() {}
@@ -38,7 +39,8 @@ public final class Guide {
                     "§2Island extras§0 .. 16", "§6Events§0 .......... 17", "§aTown people§0 ... 18",
                     "§cNether trips§0 ... 19", "§dShards & more§0 . 20", "§6Wren's Voyage§0 . 21",
                     "§dBoosters & tips§0 22", "§5The End§0 .......... 23", "§3Ancient City§0 ... 24", "§6Wren's Charts§0 . 25",
-                    "§6Ship room§0 ...... 26", "§bSunken Monument 27", "§3City Cash§0 ...... 28"},
+                    "§6Ship room§0 ...... 26", "§bSunken Monument 27", "§3City Cash§0 ...... 28",
+                    "§eYour chicken§0 ... 29"},
             {"§2§lSky Island§r", "", "§l/is§r", "go to your island", "(made the first time)", "",
                     "§l/is menu§r", "upgrades, size, info", "", "§l/is challenges§r", "goals with rewards", "",
                     "§l/is sethome§r", "set where you appear"},
@@ -108,6 +110,12 @@ public final class Guide {
                     "Push Wren's diving", "bell to the vault and", "beat the Tidemother!", "§a$5k §e$11.5k §c$19k §4$35k", "(half after 2 a day)"},
             {"§3§lCity Cash§r", "", "Earned escaping the", "Ancient City. Spend it", "at §lOld Ves§r in Wren's", "ship room: gear,",
                     "books, discs, trims.", "§l/cc§r your balance", "Weekly requests and", "a 25%-off find.", "Pays for City trips:", "§b1k 2k 4k 8k CC", ""},
+            {"§e§lYour chicken§r", "", "Comes with your island.", "§l/pet§r its menu", "§l/pet call§r  §l/pet away§r", "§l/pet name <name>§r", "",
+                    "Fights with you in the", "Nether, End and Sunken.", "Keeps one monster busy.", "Stays home: Ancient", "City, games, duels.",
+                    "Downed? It follows you", "but won't fight."},
+            {"§e§lChicken food§r", "", "§dLittle Treat§0: downed", "-> 75%. Daily quests +", "first expedition clear", "(2 a day, hold 8).",
+                    "§aLittle Snack§0: +10%.", "Pies from §2Snack", "§2Planters§0 (Wren / §l/is§r).", "15 min on your island:", "back to full health.",
+                    "Nest Egg once a day!", "", "§l/oldlook§r 2015 blocks"},
             {"§l§nRules§r", "", "Be kind in chat.", "No cheats or hacks.", "No scamming trades.", "", "Have fun!", "",
                     "§l/guide§r opens this", "book again."}
     };

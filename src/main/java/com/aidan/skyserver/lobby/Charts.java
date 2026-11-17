@@ -53,6 +53,9 @@ public final class Charts {
         String label = null;
         for (String[] s : STAMPS) if (s[0].equals(id)) label = s[1] + " §7- " + s[2];
         if (label == null) return;
+        // 5.24: every expedition clear (Nether / Sunken / Ancient City escape / End waves 10-30) - the first one each day gives a Little Treat
+        if (id.startsWith("nether_") || id.startsWith("end_") || id.startsWith("city_") || id.startsWith("sunken_"))
+            com.aidan.skyserver.Safe.run("clear treat", () -> com.aidan.skyserver.pet.PetItems.clearTreat(p));
         Set<String> mine = DATA.computeIfAbsent(p.getUUID(), k -> new HashSet<>());
         if (!mine.add(id)) return;
         save();
