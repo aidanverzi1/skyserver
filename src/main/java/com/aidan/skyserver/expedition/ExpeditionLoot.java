@@ -78,6 +78,15 @@ public final class ExpeditionLoot {
     }
 
     /** Adds `slots` separate rolls of `chance`% for one of `item`. Returns how many hit. */
+    /** 5.27: netherite (scrap, ancient debris, ingots) +25% on average: n x 1.25, the fraction as a chance of one more. */
+    static final double NETHERITE_MORE = 1.25;
+
+    private static int more(Random rng, int n) {
+        double want = n * NETHERITE_MORE;
+        int whole = (int) Math.floor(want);
+        return whole + (rng.nextDouble() < want - whole ? 1 : 0);
+    }
+
     private static int rolls(List<ItemStack> out, Random rng, Item item, int slots, int chance) {
         int hit = 0;
         for (int i = 0; i < slots + bonusRolls; i++) {
@@ -151,7 +160,7 @@ public final class ExpeditionLoot {
                 out.add(s(rod, between(rng, 1, 2)));
                 rolls(out, rng, Items.DIAMOND, 7, 37);
                 rolls(out, rng, Items.GOLDEN_APPLE, 4, 26);
-                scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 2, 16);
+                scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 2, 20); // 5.27: +25% (was 16%)
             }
             case 1 -> {
                 out.add(s(Items.GOLD_INGOT, between(rng, 14, 26)));
@@ -160,7 +169,7 @@ public final class ExpeditionLoot {
                 rolls(out, rng, Items.DIAMOND, 7, 61);
                 if (rng.nextInt(100) < 21) out.add(diamondPiece(level, rng, 0, 0, 0));
                 rolls(out, rng, Items.GOLDEN_APPLE, 4, 42);
-                scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 2, 26);
+                scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 2, 33); // 5.27: +25% (was 26%)
                 rolls(out, rng, Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 1, 8);
             }
             case 2 -> {
@@ -170,7 +179,7 @@ public final class ExpeditionLoot {
                 rolls(out, rng, Items.DIAMOND, 8, 76);
                 if (rng.nextInt(100) < 32) out.add(rng.nextBoolean() ? diamondPiece(level, rng, 2, 2, 0) : diamondPiece(level, rng, 0, 0, 0));
                 rolls(out, rng, Items.GOLDEN_APPLE, 4, 53);
-                scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 3, 26);
+                scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 3, 33); // 5.27: +25% (was 26%)
                 rolls(out, rng, Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 1, 12);
                 rolls(out, rng, Items.TOTEM_OF_UNDYING, 1, 5);
             }
@@ -182,7 +191,7 @@ public final class ExpeditionLoot {
                 if (rng.nextInt(100) < 47) out.add(diamondPiece(level, rng, 3, 3, 2));
                 rolls(out, rng, Items.GOLDEN_APPLE, 4, 63);
                 rolls(out, rng, Items.ENCHANTED_GOLDEN_APPLE, 1, 8);
-                scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 3, 37);
+                scrap[0] += rolls(out, rng, Items.NETHERITE_SCRAP, 3, 46); // 5.27: +25% (was 37%)
                 rolls(out, rng, Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 1, 20);
                 rolls(out, rng, Items.TOTEM_OF_UNDYING, 1, 10);
             }
@@ -205,18 +214,18 @@ public final class ExpeditionLoot {
                 out.add(s(Items.DIAMOND, 7));
                 out.add(s(Items.GOLD_BLOCK, rng.nextBoolean() ? 4 : 3));
                 // No scrap from the rooms: one guaranteed. Otherwise a 50% chance.
-                if (roomScrap == 0 || rng.nextBoolean()) out.add(s(Items.NETHERITE_SCRAP, 1));
+                if (roomScrap == 0 || rng.nextBoolean()) out.add(s(Items.NETHERITE_SCRAP, more(rng, 1)));
             }
             case 1 -> {
                 out.add(s(Items.DIAMOND, 13));
-                out.add(s(Items.ANCIENT_DEBRIS, 1));
+                out.add(s(Items.ANCIENT_DEBRIS, more(rng, 1)));
                 out.add(diamondArmor(level, rng, 2));
                 // At least one scrap from the rooms: one more. None: two.
-                out.add(s(Items.NETHERITE_SCRAP, roomScrap >= 1 ? 1 : 2));
+                out.add(s(Items.NETHERITE_SCRAP, more(rng, roomScrap >= 1 ? 1 : 2)));
             }
             case 2 -> {
                 out.add(s(Items.DIAMOND, 24));
-                out.add(s(Items.ANCIENT_DEBRIS, 2));
+                out.add(s(Items.ANCIENT_DEBRIS, more(rng, 2)));
                 if (rng.nextInt(100) < VAULT_TEMPLATE_CHANCE) out.add(s(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 1));
                 out.add(s(Items.ENCHANTED_GOLDEN_APPLE, 1));
                 if (rng.nextBoolean()) {
@@ -228,7 +237,7 @@ public final class ExpeditionLoot {
                 }
             }
             default -> {
-                out.add(s(Items.NETHERITE_INGOT, 1 + rng.nextInt(2)));
+                out.add(s(Items.NETHERITE_INGOT, more(rng, 1 + rng.nextInt(2))));
                 if (rng.nextInt(100) < VAULT_TEMPLATE_CHANCE) out.add(s(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 1));
                 out.add(s(Items.ENCHANTED_GOLDEN_APPLE, 2));
                 out.add(s(Items.DIAMOND, 21));

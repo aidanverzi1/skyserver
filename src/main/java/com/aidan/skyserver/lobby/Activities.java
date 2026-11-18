@@ -1459,6 +1459,7 @@ public final class Activities {
         }
         Announce.actionBar(p, msg);
         if (fish) Quests.progress(p, "fish", 1);
+        if (fish) PlayerStats.add(p, "pond_fish", 1); // 5.27: Wren's quest (pond catches only)
         if (active) rollFishKey(p, day);
         load();
         BEST.computeIfAbsent("fish", k -> new HashMap<>()).merge(p.getUUID(), 1, Integer::sum);

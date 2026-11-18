@@ -558,6 +558,7 @@ public final class Companion {
             pet.feedReady = ticks + FEED_COOLDOWN_TICKS;
             held.shrink(1);
             pet.hp = Math.min(maxHp, pet.hp + maxHp * SNACK_HEAL);
+            com.aidan.skyserver.lobby.PlayerStats.add(p, "snack_fed", 1); // 5.27: Wren's quest
             dirty();
             nameTag(pet);
             p.level().playSound(null, e.getX(), e.getY(), e.getZ(), SoundEvents.ITEM_PICKUP, SoundSource.PLAYERS, 0.8f, 1.4f);

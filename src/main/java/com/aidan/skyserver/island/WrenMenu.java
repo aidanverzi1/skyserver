@@ -19,6 +19,8 @@ import net.minecraft.world.item.Items;
  */
 public final class WrenMenu extends LockedMenu {
     private static final int QUESTS = 10, NETHER = 12, END = 13, CITY = 14, SUNKEN = 15, CHARTS = 16, ROOM = 22, VES = 24;
+    /** 5.27: ops only - start a test trip (same as /ss test, for yourself). */
+    private static final int TEST = 26;
 
     private WrenMenu(int id, Inventory inv, SimpleContainer box, ServerPlayer viewer) {
         super(id, inv, box, 3, viewer);
@@ -39,6 +41,8 @@ public final class WrenMenu extends LockedMenu {
                 room ? new String[]{"§7Your crew gathers here before a trip.", "§7Tribute Chests: the Sunken Monument fare.", "§7Lectern: island menu and Charts.",
                         "§8Move it: /is shiproom place (owner)"}
                         : new String[]{"§7Wren wants a proper cabin!", "§7Stand where the door should go,", "§7face where the ship should be, then:", "§e/is shiproom place"}));
+        if (Mods.isOp(viewer)) box.setItem(TEST, Stacks.named(new ItemStack(Items.SPYGLASS), "§b§lTest trip §7(op)",
+                "§7Any expedition, any difficulty, for you.", "§7Your inventory is set aside and given back;", "§7trip gear on landing, no rewards.", "§eClick to choose"));
         frame(Stacks.named(new ItemStack(Items.STAINED_GLASS_PANE.pick(DyeColor.BLUE)), " "));
         broadcastChanges();
     }
@@ -70,6 +74,9 @@ public final class WrenMenu extends LockedMenu {
                 viewer.closeContainer();
                 Lobby.later(viewer, () -> Charts.show(viewer));
             }
+            case TEST -> {
+                if (Mods.isOp(viewer)) Lobby.later(viewer, () -> LockedMenu.openWithBack(viewer, () -> open(viewer), () -> TestMenu.openFor(viewer)));
+            }
             case ROOM -> {
                 if (is != null && is.wrenRoom == null) {
                     viewer.closeContainer();
@@ -77,6 +84,44 @@ public final class WrenMenu extends LockedMenu {
                 }
             }
             default -> {}
+        }
+    }
+
+    /** 5.27: the op's test trip picker: one row per expedition, one button per difficulty (the End has no difficulty). */
+    static final class TestMenu extends LockedMenu {
+        private static final String[] KINDS = {"nether", "end", "city", "sunken"};
+        private static final String[] NAMES = {"§cNether Expedition", "§5End Expedition", "§3Ancient City", "§bSunken Monument"};
+        private static final String[] DIFF = {"§aEasy", "§eNormal", "§cHard", "§4Nightmare"};
+        private static final net.minecraft.world.item.Item[] ICONS = {Items.NETHERRACK, Items.END_STONE, Items.SCULK, Items.PRISMARINE_SHARD};
+        private static final DyeColor[] DIFF_DYES = {DyeColor.LIME, DyeColor.YELLOW, DyeColor.RED, DyeColor.BLACK};
+
+        private TestMenu(int id, Inventory inv, SimpleContainer box, ServerPlayer viewer) {
+            super(id, inv, box, 5, viewer);
+            for (int k = 0; k < 4; k++) {
+                box.setItem(k * 9 + 1, Stacks.named(new ItemStack(ICONS[k]), NAMES[k] + " §7(test)"));
+                int diffs = k == 1 ? 1 : 4;
+                for (int d = 0; d < diffs; d++)
+                    box.setItem(k * 9 + 3 + d, Stacks.named(new ItemStack(Items.CONCRETE.pick(DIFF_DYES[d])), k == 1 ? "§5§lTest the End" : DIFF[d] + " §7test",
+                            "§7Just you. Your inventory comes back", "§7when you're home on your island.", "§eClick to start"));
+            }
+            frame(Stacks.named(new ItemStack(Items.STAINED_GLASS_PANE.pick(DyeColor.LIGHT_BLUE)), " "));
+            broadcastChanges();
+        }
+
+        static void openFor(ServerPlayer p) {
+            LockedMenu.open(p, "§8Test trip (op)", 5, TestMenu::new);
+        }
+
+        @Override
+        protected void onClick(int slot, int button, boolean shift) {
+            if (slot < 0 || slot >= 36 || !Mods.isOp(viewer)) return;
+            int k = slot / 9, d = slot % 9 - 3;
+            if (d < 0 || d > 3 || (k == 1 && d > 0)) return;
+            viewer.closeContainer();
+            Lobby.later(viewer, () -> {
+                String err = com.aidan.skyserver.expedition.ExpeditionTest.startFor(java.util.List.of(viewer), KINDS[k], d);
+                if (err != null) Lobby.msg(viewer, "§c" + err);
+            });
         }
     }
 }

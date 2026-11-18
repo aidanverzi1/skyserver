@@ -1712,6 +1712,7 @@ public final class BedwarsGame {
             double scale = Rewards.bedwarsTeamScale(botTeams.size());
             String note = botTeams.isEmpty() ? "" : " §8(" + botTeams.size() + " team" + (botTeams.size() == 1 ? "" : "s") + " with bots: -" + Math.round((1 - scale) * 100) + "%)";
             Levels.addXp(server, p, Rewards.BW_PLAY_XP);
+            pay(p, Rewards.BW_PLAY, "for playing"); // 5.27: every active game pays $50
             Quests.progress(p, "bw_play", 1);
             PlayerStats.add(p, "bw_play", 1);
             if (bp.team == winner) {
@@ -1720,12 +1721,13 @@ public final class BedwarsGame {
                 Quests.progress(p, "bw_win", 1);
                 PlayerStats.add(p, "bw_win", 1);
                 Skills.add(p, Skills.Skill.COMBAT, 300);
+                Rewards.winBonus(server, p, "bedwars", "Bedwars", scale); // 5.27: first 3 wins today +$300
                 if (Rewards.firstWinToday("bedwars", e.getKey())) {
                     pay(p, Rewards.BW_FIRST_WIN, "(first Bedwars win today)");
                     Keys.reward(server, e.getKey(), 0, 1, "(first Bedwars win today)");
                 }
             } else {
-                pay(p, Math.round(Rewards.BW_LOSS * scale), "for playing" + note);
+                pay(p, Math.round(Rewards.BW_LOSS * scale), "for the match" + note);
             }
         }
         for (ServerPlayer p : onlineReal()) Rewards.matchEnd(p, "Bedwars");

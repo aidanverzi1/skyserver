@@ -734,6 +734,9 @@ public final class SunkenMonument {
             }
             run.crew.add(id);
             run.fares.put(id, fare);
+            // 5.27: crash refunds (the fare goes back to the Tribute Chests, a ticket comes back)
+            if (run.ticket.contains(id)) TripSafety.token(id, "sunken", mu.islandId, Tokens.SUNKEN_TICKET[mu.diff], 1);
+            else TripSafety.fare(id, "sunken", mu.islandId, fare);
         }
         if (run.crew.isEmpty()) return;
         run.crewSize = Math.min(CREW_MAX, run.crew.size());
@@ -776,6 +779,7 @@ public final class SunkenMonument {
         for (UUID id : run.crew) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
             if (p == null || (!run.test && !Islands.isIsland(p.level()))) {
+                TripSafety.clear(id, "sunken"); // 5.27: given back right here
                 if (run.ticket.remove(id)) {
                     Tokens.add(id, Tokens.SUNKEN_TICKET[run.diff], 1);
                     if (p != null) Lobby.msg(p, "§7You weren't on your island when the crew dived - your free ticket was given back.");
@@ -2128,7 +2132,7 @@ public final class SunkenMonument {
     }
 
     private static boolean canPay(Run run, UUID id) {
-        return !run.revived.contains(id) && Economy.balance(server, id) >= reviveCost(run);
+        return !run.revived.contains(id) && com.aidan.skyserver.lobby.Bank.spendable(server, id) >= reviveCost(run); // 5.27: bank counts
     }
 
     private static boolean teammateUp(Run run, UUID id) {
@@ -2205,11 +2209,14 @@ public final class SunkenMonument {
             Lobby.msg(p, "§cYou've already used your paid revive on this trip.");
             return;
         }
-        if (!Economy.take(server, p.getUUID(), reviveCost(run))) {
-            Lobby.msg(p, "§cYou don't have " + Economy.format(reviveCost(run)) + " for the revive.");
+        long fromBank = com.aidan.skyserver.lobby.Bank.takeWithBank(server, p.getUUID(), reviveCost(run)); // 5.27: wallet first, then the bank
+        if (fromBank < 0) {
+            Lobby.msg(p, "§cYou don't have " + Economy.format(reviveCost(run)) + " for the revive §7(wallet + bank).");
             if (d.phase == 1) died(p, "died");
             return;
         }
+        if (fromBank > 0) Lobby.msg(p, "§7Revive paid: " + Economy.format(fromBank) + " of it came from your bank.");
+        if (!run.test) TripSafety.money(p.getUUID(), "sunken", run.islandId, reviveCost(run));
         run.revived.add(p.getUUID());
         standUp(p, 1.0);
         Announce.title(p, "§a§lREVIVED!", "§7Nothing can hurt you for " + (REVIVE_PROTECT_TICKS / 20) + " seconds", 5, 40, 10);
@@ -2295,6 +2302,7 @@ public final class SunkenMonument {
         if (run == null || run.over) return;
         run.over = true;
         RUNS.remove(run);
+        TripSafety.clearAll("sunken", run.crew); // 5.27: ended normally - no crash refund
         ServerLevel l = level();
         for (UUID id : new ArrayList<>(run.inside)) {
             ServerPlayer p = server.getPlayerList().getPlayer(id);

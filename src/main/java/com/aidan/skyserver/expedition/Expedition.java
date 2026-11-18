@@ -80,7 +80,7 @@ import java.util.*;
  *  4. Wren flies you (~10 seconds while the map is built) to a custom arena map floating over a lava sea
  *     (ExpeditionRooms): Wren's Landing in the middle (safe, unbreakable, no mobs; talk to Wren there to go
  *     home), chest arenas on the platforms around it (3/4/5/6 by difficulty). Walk into an arena and the
- *     first wave comes: 3 waves on Easy/Normal, 4 on Hard/Nightmare, the next one on a 40-second timer even
+ *     first wave comes: 3 waves on Easy/Normal, 4 on Hard/Nightmare, the next one on a timer (WAVE_SECONDS) even
  *     if the last isn't dead. Archers take the balconies, a captain leads the last wave, and every arena has
  *     a twist (ExpeditionTwists). If you leave a fight your health can't go up until you walk back in.
  *     Beat every wave and the chest opens. After every arena (Easy/Normal) or all but one (Hard/Nightmare)
@@ -91,6 +91,8 @@ import java.util.*;
  * The expedition world is wiped every server start. Nothing about runs is saved. Nothing spawns there
  * naturally (IslandSpawnMixin), and any mob that isn't ours is removed as it appears (5.14).
  * 5.15: one paid revive per player per trip (20% of the price); time limit 30 / 35 / 45 / 60 minutes.
+ * 5.27: time limits 45 / 50 / 60 / 80 minutes, waves 40 / 40 / 55 / 60 s apart; the paid revive can use bank money;
+ *   crash refunds (TripSafety).
  *
  * 5.17:
  *  - CO-OP: up to 3 players. Island members AND the caller's faction mates can board (/expedition board).
@@ -121,7 +123,8 @@ public final class Expedition {
     /** Guards in each wave for ONE player (5.18: each extra player adds CREW_EXTRA_GUARDS to every wave but the last). */
     static final int[][] WAVES = {{3, 4, 5}, {4, 5, 6}, {4, 5, 6, 7}, {5, 6, 7, 8}};
     /** Seconds until the next wave comes anyway (Ambush arenas: 5 fewer). */
-    static final int[] WAVE_SECONDS = {40, 40, 40, 40};
+    /** 5.27: seconds between waves (Easy / Normal 40 as before, Hard 55, Nightmare 60). */
+    static final int[] WAVE_SECONDS = {40, 40, 55, 60};
     /** Old 5.10 guard counts (no longer used for waves; kept so nothing that reads it breaks). */
     static final int[] GUARDS = {3, 4, 6, 8};
     /** Extra health / damage for every guard (0.5 = +50%). */
@@ -151,8 +154,8 @@ public final class Expedition {
     static final int WITHER_CHANCE = 50;
     /** Seconds a guard may spend outside its room before it's sent back. */
     static final int LEASH_SECONDS = 3;
-    /** The time limit by difficulty for one player (Easy 30, Normal 35, Hard 45, Nightmare 60 minutes). */
-    static final int[] TIME_LIMITS = {30 * 60, 35 * 60, 45 * 60, 60 * 60};
+    /** The time limit by difficulty for one player (5.27: Easy 45, Normal 50, Hard 60, Nightmare 80 minutes). */
+    static final int[] TIME_LIMITS = {45 * 60, 50 * 60, 60 * 60, 80 * 60};
     static final int TIME_LIMIT_SECONDS = TIME_LIMITS[0];
     /** The paid revive: its price as a share of the trip's price, seconds to decide, and ticks of protection afterwards. */
     static final double REVIVE_SHARE = 0.20;
@@ -317,6 +320,7 @@ public final class Expedition {
         ExpeditionGold.init(); // 5.19: the 5 trapped gold blocks on the bridges
         ExpeditionSiege.init(); // 5.25: ranged guards break player-placed blocks (hiding / towering up)
         ExpeditionTest.init(); // 5.25: /ss test - op test trips for every expedition
+        TripSafety.init();     // 5.27: refunds for trips lost in a server crash
         AncientCity.init();    // 5.19: the Ancient City Expedition (registered before Lobby, like the End)
         SunkenMonument.init(); // 5.20: the Sunken Monument Expedition
         com.aidan.skyserver.island.WrenRoom.init(); // 5.20: Captain Wren's ship room (before Islands' own handlers)
@@ -614,6 +618,8 @@ public final class Expedition {
         pd.ticket = ticket;
         pd.since = ticks;
         PENDING.put(is.id, pd);
+        if (ticket >= 0) TripSafety.token(p.getUUID(), "nether", is.id, Tokens.TICKET[ticket], 1); // 5.27: crash refunds
+        else TripSafety.money(p.getUUID(), "nether", is.id, PRICES[0]);
         p.level().playSound(null, p.getX(), p.getY(), p.getZ(), SoundEvents.BELL_BLOCK, SoundSource.PLAYERS, 1.5f, 0.8f);
         Islands.islandChat(is, "§6§l⚓ " + p.getName().getString() + " is getting a Nether Expedition ready in Captain Wren's ship room!");
         for (ServerPlayer m : islandOnline(is)) {
@@ -634,6 +640,7 @@ public final class Expedition {
     }
 
     private static void refund(UUID id, int ticket) {
+        TripSafety.clear(id, "nether");
         if (ticket >= 0) Tokens.add(id, Tokens.TICKET[ticket], 1);
         else {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
@@ -815,6 +822,8 @@ public final class Expedition {
             return;
         }
         pd.joined.put(id, used);
+        if (used >= 0) TripSafety.token(id, "nether", is.id, Tokens.TICKET[used], 1); // 5.27: crash refunds
+        else TripSafety.money(id, "nether", is.id, PRICES[pd.diff]);
         for (ServerPlayer m : crewOnDeck(is))
             Lobby.msg(m, "§a" + p.getName().getString() + " joined the crew §7(" + (used >= 0 ? "a " + DIFF_NAMES[used] + " ticket" : Economy.format(PRICES[pd.diff])) + ").");
     }
@@ -832,6 +841,7 @@ public final class Expedition {
 
     /** Gives a crew member who paid to join their money or ticket back. */
     private static void refundJoin(UUID id, int usedTicket, int diff) {
+        TripSafety.clear(id, "nether");
         ServerPlayer p = server.getPlayerList().getPlayer(id);
         if (usedTicket >= 0) Tokens.add(id, Tokens.TICKET[usedTicket], 1);
         else Economy.add(server, id, p == null ? "?" : p.getName().getString(), PRICES[diff]);
@@ -891,6 +901,7 @@ public final class Expedition {
             Lobby.msg(leader, "§cWren couldn't find a safe place to land this time - try again.");
             return;
         }
+        if (owe > 0) TripSafety.money(leader.getUUID(), "nether", is.id, owe); // 5.27: the rest of the captain's price
         // Whoever else is in the room didn't pay: they stay behind (visitors from other islands go home).
         for (ServerPlayer m : deck) {
             if (crew.contains(m)) continue;
@@ -1809,7 +1820,7 @@ public final class Expedition {
 
     /** Could this player still buy their one paid revive? */
     private static boolean canPay(Run run, UUID id) {
-        return !run.revived.contains(id) && Economy.balance(server, id) >= reviveCost(run);
+        return !run.revived.contains(id) && com.aidan.skyserver.lobby.Bank.spendable(server, id) >= reviveCost(run); // 5.27: bank counts
     }
 
     /** Is any other crew member still on their feet in the Nether? */
@@ -1908,15 +1919,18 @@ public final class Expedition {
             return;
         }
         long cost = reviveCost(d.run);
-        if (!Economy.take(server, id, cost)) {
-            Lobby.msg(p, "§cYou don't have " + Economy.format(cost) + " for the revive.");
+        long fromBank = com.aidan.skyserver.lobby.Bank.takeWithBank(server, id, cost); // 5.27: wallet first, then the bank
+        if (fromBank < 0) {
+            Lobby.msg(p, "§cYou don't have " + Economy.format(cost) + " for the revive §7(wallet + bank).");
             if (d.phase == 1) died(p, "died");
             return;
         }
         d.run.revived.add(id);
+        if (!d.run.test) TripSafety.money(id, "nether", d.run.islandId, cost);
         standUp(p, d, 1.0);
         Announce.title(p, "§a§lREVIVED!", "§7Nothing can hurt you for " + (REVIVE_PROTECT_TICKS / 20) + " seconds", 5, 40, 10);
-        Lobby.msg(p, "§a§lRevived! §7-" + Economy.format(cost) + ". That was your one paid revive for this trip.");
+        Lobby.msg(p, "§a§lRevived! §7-" + Economy.format(cost) + (fromBank > 0 ? " §8(" + Economy.format(fromBank) + " from your bank)§7" : "")
+                + ". That was your one paid revive for this trip.");
         for (ServerPlayer m : inside(d.run)) if (m != p) Lobby.msg(m, "§a" + p.getName().getString() + " is back up!");
     }
 
@@ -2091,6 +2105,7 @@ public final class Expedition {
         Islands.Island is = islandById(run.islandId);
         if (is != null) Islands.islandChat(is, "§6[Captain Wren] §fThat's the crew home (" + why + ").");
         Lobby.runLaterTicks(20 * 20, () -> departShip(run.islandId));
+        TripSafety.clearIsland("nether", run.islandId); // 5.27: ended normally - no crash refund
         Skyserver.LOGGER.info("Nether Expedition on island {} over: {}", run.islandId, why);
     }
 

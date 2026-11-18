@@ -23,6 +23,8 @@ import java.util.*;
  *   - Kills on bots pay half.
  *   - The first win of the day in each game pays a big bonus (so short daily sessions feel great,
  *     and grinding all day isn't required to keep up).
+ *   - 5.27: every Bedwars / Skywars / Gold Wars game pays $50 for playing, and the first 3 wins of the day in
+ *     each of them pay $300 more (cut by bots like the win pay). Skill level-up money is 20% lower.
  *
  * 5.8: money paid through here gets money boosters (Boosters.money).
  * 5.13: and the Voyage money perk (+10% in the featured mode); it's also counted for /ss usage.
@@ -31,14 +33,16 @@ public final class Rewards {
     // ---- Gold Wars (a match is ~20 minutes) ---- 5.8: win 600 -> 550, loss 200 -> 175, first win 750 -> 600
     // 5.18: Skywars, Gold Wars and Bedwars pay 25% more (they're meant to be the main money makers).
     public static final long GW_WIN = 688, GW_LOSS = 219, GW_GOLD = 19, GW_KILL = 19, GW_FIRST_WIN = 750;
+    /** 5.27: $50 for every Gold Wars game you're active in, win or lose (on top of the win / loss pay). */
+    public static final long GW_PLAY = 50;
     public static final int GW_WIN_XP = 120, GW_LOSS_XP = 50, GW_GOLD_XP = 10, GW_KILL_XP = 6;
     // ---- Skywars (a match is ~5-8 minutes) ----
     public static final long SW_WIN = 625, SW_SECOND = 250, SW_THIRD = 125, SW_KILL = 38, SW_PLAY = 50, SW_FIRST_WIN = 625;
     public static final int SW_WIN_XP = 100, SW_SECOND_XP = 50, SW_THIRD_XP = 30, SW_KILL_XP = 12, SW_PLAY_XP = 15;
     // ---- Bedwars (a match is ~15-30 minutes) ---- 5.8: win 700, loss 100, bed 100, first win $500 (+ Common Key)
     public static final long BW_WIN = 875, BW_LOSS = 125, BW_BED = 125, BW_FINAL = 31, BW_KILL = 13, BW_FIRST_WIN = 625;
-    /** No longer paid (5.8: everyone who doesn't win gets BW_LOSS instead). Kept so old code still compiles. */
-    public static final long BW_PLAY = 0;
+    /** 5.27: $50 for every Bedwars game you're active in, win or lose (on top of the win / loss pay). */
+    public static final long BW_PLAY = 50;
     public static final int BW_WIN_XP = 110, BW_PLAY_XP = 45, BW_BED_XP = 25, BW_FINAL_XP = 10, BW_KILL_XP = 5;
     /** Bedwars: -8% for every other team that has at least one bot (5.13: was 15%). */
     public static final double BW_CUT_PER_BOT_TEAM = 0.08;
@@ -46,7 +50,12 @@ public final class Rewards {
     public static final double BOT_KILL_PAY = 0.5, WIN_CUT_PER_BOT = 0.15, MIN_BOT_SCALE = 0.25;
     public static final int DAILY_LOGIN_XP = 30, CHEST_OPEN_XP = 10;
 
+    /** 5.27: the first WIN_BONUS_WINS wins of the day in EACH of Bedwars, Skywars and Gold Wars pay WIN_BONUS more (cut by bots like win pay). */
+    public static final long WIN_BONUS = 300;
+    public static final int WIN_BONUS_WINS = 3;
+
     private static final Map<String, String> FIRST_WIN_DAY = new HashMap<>(); // "game:uuid" -> day
+    private static final Map<String, String> WIN_COUNT = new HashMap<>(); // 5.27: "game:uuid" -> "day:count"
     private static boolean loaded = false;
 
     private Rewards() {}
@@ -133,17 +142,62 @@ public final class Rewards {
         return true;
     }
 
+    /**
+     * 5.27: counts a win and pays the daily win bonus if it's one of this player's first WIN_BONUS_WINS wins today
+     * in this game. scale = the same bot cut as the win pay. Call it once per win.
+     */
+    public static void winBonus(MinecraftServer server, ServerPlayer p, String game, String gameName, double scale) {
+        if (p == null || p instanceof com.aidan.skyserver.bots.BotPlayer) return;
+        load();
+        String key = game + ":" + p.getUUID(), today = LocalDate.now().toString();
+        String v = WIN_COUNT.get(key);
+        int n = 0;
+        if (v != null && v.startsWith(today + ":")) {
+            try {
+                n = Integer.parseInt(v.substring(today.length() + 1));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (n >= WIN_BONUS_WINS) return;
+        n++;
+        WIN_COUNT.put(key, today + ":" + n);
+        save();
+        pay(server, p, Math.round(WIN_BONUS * scale), "(" + gameName + " win bonus " + n + "/" + WIN_BONUS_WINS + " today)");
+    }
+
+    /** 5.27: how many of today's win bonuses this player still has in this game (Guide's "What next?"). */
+    public static int winBonusLeft(String game, UUID id) {
+        load();
+        String v = WIN_COUNT.get(game + ":" + id), today = LocalDate.now().toString();
+        int n = 0;
+        if (v != null && v.startsWith(today + ":")) {
+            try {
+                n = Integer.parseInt(v.substring(today.length() + 1));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return Math.max(0, WIN_BONUS_WINS - n);
+    }
+
     private static void load() {
         if (loaded) return;
         loaded = true;
         JsonObject o = Stacks.readFile("first-wins.json");
-        for (Map.Entry<String, JsonElement> e : o.entrySet()) FIRST_WIN_DAY.put(e.getKey(), e.getValue().getAsString());
+        for (Map.Entry<String, JsonElement> e : o.entrySet()) {
+            if (e.getKey().equals("_wins")) continue;
+            FIRST_WIN_DAY.put(e.getKey(), e.getValue().getAsString());
+        }
+        if (o.has("_wins") && o.get("_wins").isJsonObject())
+            for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("_wins").entrySet()) WIN_COUNT.put(e.getKey(), e.getValue().getAsString());
     }
 
     private static void save() {
         JsonObject o = new JsonObject();
         String today = LocalDate.now().toString();
         FIRST_WIN_DAY.forEach((k, v) -> { if (v.equals(today)) o.addProperty(k, v); });
+        JsonObject wins = new JsonObject();
+        WIN_COUNT.forEach((k, v) -> { if (v.startsWith(today + ":")) wins.addProperty(k, v); });
+        o.add("_wins", wins);
         Stacks.writeFile("first-wins.json", o);
     }
 }

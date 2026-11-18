@@ -61,7 +61,7 @@ public final class PetItems {
     public static final String TREAT = "pet_treat", SNACK = "pet_snack", EGG = "pet_egg",
             FEATHER = "pet_plate_feather", GILDED = "pet_plate_gilded";
     /** Wren's quest step that gives the first Little Snack Planter (16 = the first step of chapter 2). */
-    public static final int SNACK_PLANT_STEP = 16;
+    public static final int SNACK_PLANT_STEP = 20; // 5.27: the Skywars-win quest is #20 now (was 16)
     public static final int MAX_TREATS = 8;
     public static final int SNACKS_PER_HARVEST = 3;
     public static final int FEATHER_DURABILITY = 12_000, GILDED_DURABILITY = 20_000;

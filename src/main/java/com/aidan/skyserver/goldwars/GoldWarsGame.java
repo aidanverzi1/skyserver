@@ -1121,6 +1121,7 @@ public final class GoldWarsGame {
             int enemyBots = botCount(gp.team.other());
             double scale = com.aidan.skyserver.lobby.Rewards.botScale(enemyBots);
             String bots = enemyBots > 0 ? " §8(" + enemyBots + " bots on the other team)" : "";
+            pay(p, com.aidan.skyserver.lobby.Rewards.GW_PLAY, "for playing"); // 5.27: every active game pays $50
             if (winner == gp.team) {
                 pay(p, Math.round(com.aidan.skyserver.lobby.Rewards.GW_WIN * scale), "for winning" + bots);
                 com.aidan.skyserver.lobby.Levels.addXp(server, p, com.aidan.skyserver.lobby.Rewards.GW_WIN_XP);
@@ -1128,13 +1129,14 @@ public final class GoldWarsGame {
                 com.aidan.skyserver.lobby.PlayerStats.add(p, "gw_win", 1);
                 com.aidan.skyserver.lobby.Skills.add(p, com.aidan.skyserver.lobby.Skills.Skill.COMBAT, 300);
                 com.aidan.skyserver.lobby.Quests.progress(p, "gw_play", 1);
+                com.aidan.skyserver.lobby.Rewards.winBonus(server, p, "goldwars", "Gold Wars", scale); // 5.27: first 3 wins today +$300
                 if (com.aidan.skyserver.lobby.Rewards.firstWinToday("goldwars", e.getKey())) {
                     pay(p, Math.round(com.aidan.skyserver.lobby.Rewards.GW_FIRST_WIN * scale), "first Gold Wars win of the day!");
                     boolean realOpponents = realCount(winner.other()) > 0;
                     com.aidan.skyserver.lobby.Keys.reward(server, e.getKey(), realOpponents ? 1 : 0, 1, "(first Gold Wars win today)");
                 }
             } else {
-                pay(p, Math.round(com.aidan.skyserver.lobby.Rewards.GW_LOSS * scale), winner == null ? "for a tie" : "for playing");
+                pay(p, Math.round(com.aidan.skyserver.lobby.Rewards.GW_LOSS * scale), winner == null ? "for a tie" : "for the match");
                 com.aidan.skyserver.lobby.Levels.addXp(server, p, com.aidan.skyserver.lobby.Rewards.GW_LOSS_XP);
                 com.aidan.skyserver.lobby.Quests.progress(p, "gw_play", 1);
             }

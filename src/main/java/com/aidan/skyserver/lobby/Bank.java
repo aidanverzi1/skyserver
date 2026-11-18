@@ -155,6 +155,31 @@ public final class Bank {
         Lobby.msg(p, "§6Withdrew " + Economy.format(amount) + ". §7Bank balance: §6" + Economy.format(a[0]));
     }
 
+    /** 5.27: wallet + bank together (what an expedition revive can use). */
+    public static long spendable(MinecraftServer server, UUID id) {
+        return Math.max(0, Economy.balance(server, id)) + balance(id);
+    }
+
+    /**
+     * 5.27: pays `cost` from the wallet first and the rest from the bank (expedition revives).
+     * Returns how much came out of the bank (0 = all from the wallet), or -1 if wallet + bank isn't enough
+     * (nothing is taken then). A test trip's free spending still works (Economy.take says yes for free).
+     */
+    public static long takeWithBank(MinecraftServer server, UUID id, long cost) {
+        if (cost <= 0) return 0;
+        long wallet = Math.max(0, Economy.balance(server, id));
+        if (wallet >= cost || com.aidan.skyserver.expedition.ExpeditionTest.freeSpend(id)) return Economy.take(server, id, cost) ? 0 : -1;
+        long[] a = account(id);
+        long fromBank = cost - wallet;
+        if (a[0] < fromBank) return -1;
+        if (wallet > 0 && !Economy.take(server, id, wallet)) return -1;
+        a[0] -= fromBank;
+        a[1] = Math.min(a[1], a[0]);
+        save();
+        TxLog.money(id, null, -fromBank);
+        return fromBank;
+    }
+
     private static String nextText(long[] a) {
         return "Interest is 1% a week, added every day (about " + String.format(Locale.ROOT, "%.2f", DAILY_RATE * 100) + "% a day, compounding) on the lowest balance since your last payment, up to "
                 + Economy.format(CAP) + ".";

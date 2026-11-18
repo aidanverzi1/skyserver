@@ -325,9 +325,12 @@ public final class Skills {
         Lobby.msg(p, text);
     }
 
-    /** Level-up money: $40 per level, plus a bit extra past level 10 since levels take longer now. */
+    /**
+     * Level-up money: $32 per level, plus $16 per level past 10 since levels take longer.
+     * 5.27: 20% less than before ($40 + $20) - skills were paying far more than Bedwars / Skywars / Gold Wars.
+     */
     public static long levelMoney(int lvl) {
-        return 40L * lvl + (lvl > 10 ? 20L * (lvl - 10) : 0);
+        return 32L * lvl + (lvl > 10 ? 16L * (lvl - 10) : 0);
     }
 
     private static void levelUp(ServerPlayer p, Skill s, int lvl) {

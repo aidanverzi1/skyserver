@@ -520,7 +520,14 @@ public final class EndExpedition {
         return false;
     }
 
+    /** 5.27 (TripSafety): what this player paid, kept until the trip ends normally or they get it back. */
+    private static void record(UUID id, int island, boolean ticket) {
+        if (ticket) TripSafety.token(id, "end", island, Tokens.END_TICKET, 1);
+        else TripSafety.money(id, "end", island, PRICE);
+    }
+
     private static void refund(UUID id, boolean ticket) {
+        TripSafety.clear(id, "end");
         ServerPlayer p = server.getPlayerList().getPlayer(id);
         if (ticket) Tokens.add(id, Tokens.END_TICKET, 1);
         else Economy.add(server, id, p == null ? "" : p.getName().getString(), PRICE);
@@ -573,6 +580,7 @@ public final class EndExpedition {
         if (busy(p) || !geared(p) || !pay(p, ticket)) return;
         Muster mu = new Muster(p, is.id);
         mu.paid.put(p.getUUID(), ticket);
+        record(p.getUUID(), is.id, ticket); // 5.27: crash refunds
         mu.deadline = ticks + MUSTER_SECONDS * 20L;
         MUSTERS.add(mu);
         Lobby.msg(p, "§6[Captain Wren] §fRight, to the End! §7Your crew has §f" + MUSTER_SECONDS + " seconds §7to join (up to " + (CREW_MAX - 1) + "). ");
@@ -621,6 +629,7 @@ public final class EndExpedition {
         }
         if (!pay(p, ticket)) return;
         mu.paid.put(p.getUUID(), ticket);
+        record(p.getUUID(), mu.islandId, ticket); // 5.27: crash refunds
         for (UUID id : mu.paid.keySet()) {
             ServerPlayer m = server.getPlayerList().getPlayer(id);
             if (m != null) Lobby.msg(m, "§a" + p.getName().getString() + " joined the End crew §7(" + mu.paid.size() + "/" + CREW_MAX + ").");
@@ -1184,7 +1193,7 @@ public final class EndExpedition {
     }
 
     private static boolean canPay(Run run, UUID id) {
-        return !run.revived.contains(id) && Economy.balance(server, id) >= reviveCost();
+        return !run.revived.contains(id) && com.aidan.skyserver.lobby.Bank.spendable(server, id) >= reviveCost(); // 5.27: bank counts
     }
 
     private static boolean teammateUp(Run run, UUID id) {
@@ -1268,11 +1277,14 @@ public final class EndExpedition {
             Lobby.msg(p, "§cYou've already used your paid revive on this trip.");
             return;
         }
-        if (!Economy.take(server, p.getUUID(), reviveCost())) {
-            Lobby.msg(p, "§cYou don't have " + Economy.format(reviveCost()) + " for the revive.");
+        long fromBank = com.aidan.skyserver.lobby.Bank.takeWithBank(server, p.getUUID(), reviveCost()); // 5.27: wallet first, then the bank
+        if (fromBank < 0) {
+            Lobby.msg(p, "§cYou don't have " + Economy.format(reviveCost()) + " for the revive §7(wallet + bank).");
             if (d.phase == 1) died(p, "died");
             return;
         }
+        if (fromBank > 0) Lobby.msg(p, "§7Revive paid: " + Economy.format(fromBank) + " of it came from your bank.");
+        if (!run.test) TripSafety.money(p.getUUID(), "end", run.islandId, reviveCost());
         run.revived.add(p.getUUID());
         standUp(p, 1.0);
         Announce.title(p, "§a§lREVIVED!", "§7Nothing can hurt you for " + (REVIVE_PROTECT_TICKS / 20) + " seconds", 5, 40, 10);
@@ -1357,6 +1369,7 @@ public final class EndExpedition {
         if (run == null || RUNS[run.slot] != run) return;
         run.over = true;
         RUNS[run.slot] = null;
+        TripSafety.clearAll("end", run.crew); // 5.27: ended normally - no crash refund
         ServerLevel l = level(run);
         EndOmens.runOver(l, run);
         if (run.bar != null) run.bar.removeAllPlayers();

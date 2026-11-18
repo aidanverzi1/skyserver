@@ -661,6 +661,7 @@ public final class SkywarsGame {
                 com.aidan.skyserver.lobby.PlayerStats.add(winner, "sw_win", 1);
                 com.aidan.skyserver.lobby.Skills.add(winner, com.aidan.skyserver.lobby.Skills.Skill.COMBAT, 250);
                 com.aidan.skyserver.lobby.Quests.progress(winner, "sw_play", 1);
+                com.aidan.skyserver.lobby.Rewards.winBonus(server, winner, "skywars", "Skywars", scale); // 5.27: first 3 wins today +$300
                 if (com.aidan.skyserver.lobby.Rewards.firstWinToday("skywars", winnerId)) {
                     com.aidan.skyserver.lobby.Rewards.pay(server, winner, Math.round(com.aidan.skyserver.lobby.Rewards.SW_FIRST_WIN * scale), "first Skywars win of the day!");
                     // Key: Uncommon for beating real players, Common if every opponent was a bot.

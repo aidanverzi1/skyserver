@@ -33,6 +33,11 @@ import java.util.*;
  * them if they change islands. Island things (the islet chest, generator level, size, challenges) count for
  * everyone on the island. Players who were on an island when 5.25 arrived start at that island's old shared
  * quest; anyone who joins later starts at quest 1. Edit the steps below to change the quest line.
+ *
+ * 5.27: the quest line visits every activity: the lobby Mine, an elytra course, a mystery chest, the fishing pond,
+ * Wren's Voyage, a copper golem, the chicken, all four expeditions, Wren's Charts (13 new quests, 68 in all; the
+ * Spleef quest became "clear 10 expeditions"). Everyone keeps the quest they were on (PLAYER_LINE 3 in
+ * wren-quests.json); new quests that land before your spot are skipped.
  */
 public final class IslandQuests {
     public static final String WREN_TAG = "skyserver_wren";
@@ -46,8 +51,11 @@ public final class IslandQuests {
      * COUNT: one of our counters (PlayerStats: sw_win, gw_win, game_kill, harvest...), from when it starts.
      * TOTAL: one of our counters, all-time (for "have you ever..." requirements).
      * SKILL: have [amount] skills at level [target] or higher.
+     * 5.27: COUNT / TOTAL targets may add counters together ("expedition_win+city_win").
+     * GOLEM: the island has a copper golem on its crew (island thing). CHART: Wren's Charts stamps - "nether_0,nether_1"
+     *   = has any of them (amount 1), "*" = how many stamps in all.
      */
-    enum Kind { REACH_ISLET, MINED, CRAFTED, PLACED, LEVEL, GEN, SIZE, CHALLENGE, STAT, COUNT, TOTAL, SKILL }
+    enum Kind { REACH_ISLET, MINED, CRAFTED, PLACED, LEVEL, GEN, SIZE, CHALLENGE, STAT, COUNT, TOTAL, SKILL, GOLEM, CHART }
 
     /** One quest. target = block/item id for MINED/CRAFTED/PLACED ("#sapling" = any sapling). */
     record Step(Kind kind, String target, int amount, String task, String done, long money, int xp, int keyTier) {}
@@ -63,12 +71,20 @@ public final class IslandQuests {
             new Step(Kind.CRAFTED, "bread", 5, "Bake 5 bread from your wheat.", "Smells like home. Thank you, friend.", 400, 50, 0),
             new Step(Kind.PLACED, "#sapling", 4, "Plant 4 saplings so you'll never run out of wood.", "A forest in the clouds. I love it.", 250, 40, -1),
             new Step(Kind.CRAFTED, "chest", 2, "Craft 2 chests to keep your things in.", "Every captain needs a good hold.", 250, 30, -1),
+            new Step(Kind.COUNT, "mine_ore", 20, "Visit the lobby Mine (under the Town - use the compass) and mine 20 ores. They come to your island: /claim here.",
+                    "Ores from under the Town! Every bit helps out here.", 400, 50, -1), // 5.27
             new Step(Kind.LEVEL, "", 3, "Reach server level 3 (everything you do on the server gives XP - type /level).", "You're growing, captain!", 500, 60, 0),
+            new Step(Kind.COUNT, "elytra", 1, "Fly an elytra ring course in the lobby (compass -> Elytra Rings).",
+                    "Through the rings! You've got a sailor's nerve.", 500, 60, -1), // 5.27
+            new Step(Kind.COUNT, "crate", 1, "Open a mystery chest in the lobby's Great Hall with any key (/keys shows yours).",
+                    "What did you get? Keys turn up everywhere - save them up!", 400, 50, -1), // 5.27
             new Step(Kind.GEN, "", 2, "Upgrade your generator to level 2 in the /is menu (it starts making ores).",
                     "Ores from thin air! Now you're thinking like an islander.", 1_000, 80, -1),
             new Step(Kind.MINED, "iron_ore", 10, "Mine 10 iron ore from your generator.", "Iron! Now we can build properly.", 750, 70, -1),
             new Step(Kind.CRAFTED, "iron_pickaxe", 1, "Smelt the iron and craft an iron pickaxe.", "That'll cut through anything.", 600, 60, 1),
             new Step(Kind.CHALLENGE, "", 1, "Complete an island challenge (/is challenges).", "Challenges are a fine way to earn a living.", 750, 70, -1),
+            new Step(Kind.COUNT, "pond_fish", 10, "Catch 10 fish at the lobby Fishing Pond (compass -> Fishing Pond). The pond pays for good fish!",
+                    "A fine catch. The pond's a good place to earn on a quiet day.", 600, 60, -1), // 5.27
             new Step(Kind.SIZE, "", 1, "Buy your first island expansion in the /is menu.", "More sky to build on. The horizon is yours!", 3_000, 150, 1),
             new Step(Kind.LEVEL, "", 10, "Reach server level 10.", "Look at this place! You've built a real home. I'm proud of you, captain.", 5_000, 300, 2),
 
@@ -76,10 +92,14 @@ public final class IslandQuests {
             new Step(Kind.TOTAL, "sw_win", 1, "Before the Trials: win a game of Skywars.", "A Skywars champion! Good.", 1_000, 100, -1),
             new Step(Kind.TOTAL, "gw_win", 1, "Win a game of Gold Wars.", "You can fight with a crew too. Excellent.", 1_000, 100, -1),
             new Step(Kind.TOTAL, "bw_win", 1, "Win a game of Bedwars.", "Guarded your bed and broke theirs! A captain always protects her bunk.", 1_000, 100, -1),
+            new Step(Kind.COUNT, "voyage_stamp", 1, "Earn a stamp in Wren's Weekly Voyage - one game gets a twist from Thursday to Sunday (/voyage).",
+                    "A Voyage stamp! I'll mark it in the ship's log.", 1_500, 120, -1), // 5.27
             new Step(Kind.SKILL, "5", 1, "Get any skill to level 5 (/skills).", "You're learning a trade. The Trials can begin!", 1_000, 100, 1),
             new Step(Kind.MINED, "iron_ore", 64, "Mine 64 iron ore on your island.", "That's a proper haul of iron.", 2_000, 150, -1),
             new Step(Kind.CRAFTED, "iron_ingot", 128, "Smelt 128 iron ingots.", "The furnaces have been busy, I see.", 2_000, 150, -1),
             new Step(Kind.CRAFTED, "anvil", 1, "Forge an anvil.", "Every good workshop needs one.", 1_500, 120, -1),
+            new Step(Kind.GOLEM, "", 1, "Get a copper golem for your island crew: build one next to a copper chest, then sneak-click the chest for the golem hub.",
+                    "A little copper deckhand! Give it some chests to sort.", 2_000, 150, -1), // 5.27
             new Step(Kind.STAT, "animals_bred", 20, "Breed 20 animals (Wren's starter flock, or spawn eggs from /is menu).", "A proper farm! I can hear them from here.", 2_500, 180, 1),
             new Step(Kind.STAT, "fish_caught", 100, "Catch 100 fish.", "Patience - the mark of a true sailor.", 2_500, 180, -1),
             new Step(Kind.MINED, "wheat", 500, "Harvest 500 wheat.", "Golden fields in the sky. Beautiful.", 2_500, 180, -1),
@@ -87,9 +107,17 @@ public final class IslandQuests {
             new Step(Kind.MINED, "diamond_ore", 20, "Mine 20 diamond ore on your island (upgrade your generator).", "Diamonds! Now we're talking.", 4_000, 250, 2),
             new Step(Kind.CRAFTED, "enchanting_table", 1, "Craft an enchanting table.", "Magic, out here in the clouds...", 3_000, 200, -1),
             new Step(Kind.STAT, "enchant_item", 10, "Enchant 10 items.", "Glowing gear for a glowing captain.", 3_500, 220, -1),
+            new Step(Kind.CHART, "nether_0,nether_1,nether_2,nether_3", 1, "Clear a Nether Expedition with me (ship room). Bring diamond armour, a bow and golden apples - or try it first with friends.",
+                    "Back from the Nether in one piece! I knew you had it in you.", 4_000, 250, 1), // 5.27
+            new Step(Kind.COUNT, "snack_fed", 1, "Feed your chicken a Little Snack when it's hurt (it fights with you on expeditions; grow snacks on a Snack Planter).",
+                    "Happy chicken, happy captain.", 1_500, 120, -1), // 5.27
             new Step(Kind.COUNT, "duel_win", 5, "Win 5 duels in the lobby (practice bots count).", "Quick with a sword, aren't you?", 3_000, 200, -1),
             new Step(Kind.COUNT, "bw_bed", 5, "Break 5 enemy beds in Bedwars.", "Five beds! Nobody's sleeping well tonight.", 3_000, 200, 1),
             new Step(Kind.COUNT, "course_hard", 1, "Finish the Sky Spire (hard) obstacle course.", "Light on your feet! I'd never manage that.", 3_500, 220, 2),
+            new Step(Kind.CHART, "city_0,city_1,city_2,city_3", 1, "Escape the Ancient City with the relic (stay quiet, crouch on carpet, bring a recovery compass).",
+                    "Out of the deep dark! Old Ves will want to hear every word.", 4_000, 250, -1), // 5.27
+            new Step(Kind.CHART, "sunken_0,sunken_1,sunken_2,sunken_3", 1, "Clear the Sunken Monument (the fare is farm items in the Tribute Chests).",
+                    "The Tidemother beaten! The sea owes you one, captain.", 4_000, 250, 1), // 5.27
             new Step(Kind.SKILL, "15", 3, "Get 3 skills to level 15.", "A captain of many trades.", 4_000, 250, -1),
             new Step(Kind.LEVEL, "", 35, "Reach server level 35.", "Your name's known across the skies now.", 6_000, 350, -1),
             new Step(Kind.LEVEL, "", 45, "Reach server level 45 to finish the Trials.",
@@ -97,6 +125,8 @@ public final class IslandQuests {
 
             // ===== Chapter 3: The Legend of the Skies (about a month; ends with a Legendary Key) =====
             new Step(Kind.SKILL, "50", 2, "To begin the Legend: max out 2 skills (level 50).", "Two masteries. Now the real voyage begins.", 10_000, 500, 2),
+            new Step(Kind.CHART, "end_10", 1, "Reach wave 10 of the End Expedition (full netherite only).",
+                    "The End, and back again! Few captains can say that.", 12_000, 600, -1), // 5.27
             new Step(Kind.COUNT, "island_ore", 1_000, "Mine 1,000 ores on your island.", "A thousand ores! The generators must be worn smooth.", 12_000, 600, -1),
             new Step(Kind.COUNT, "harvest", 5_000, "Harvest 5,000 grown crops on your island.", "Enough to feed a fleet.", 12_000, 600, -1),
             new Step(Kind.STAT, "animals_bred", 200, "Breed 200 animals.", "Your island's a zoo! A wonderful one.", 12_000, 600, 2),
@@ -108,10 +138,15 @@ public final class IslandQuests {
             new Step(Kind.COUNT, "bw_win", 25, "Win 25 games of Bedwars.", "Twenty-five! The sky's best bed-guard.", 15_000, 700, -1),
             new Step(Kind.COUNT, "bw_final", 100, "Get 100 final kills in Bedwars.", "A hundred crews sent home for good.", 15_000, 700, 2),
             new Step(Kind.COUNT, "game_kill", 300, "Get 300 kills in Skywars, Gold Wars and Bedwars.", "Remind me never to cross you.", 15_000, 700, 2),
+            new Step(Kind.CHART, "nether_2,nether_3", 1, "Clear a Hard or Nightmare Nether Expedition.",
+                    "A Hard Nether! The piglins tell stories about you now.", 15_000, 700, 2), // 5.27
             new Step(Kind.COUNT, "course_extreme", 10, "Finish the Void Gauntlet (extreme course) 10 times.", "Ten times! You must have wings.", 20_000, 800, -1),
-            new Step(Kind.COUNT, "spleef_win", 50, "Win 50 Spleef or TNT Run rounds.", "Nobody keeps their footing like you.", 15_000, 700, -1),
+            new Step(Kind.COUNT, "expedition_win+city_win+sunken_win", 10, "Clear 10 expeditions (Nether, Ancient City or Sunken Monument).",
+                    "Ten voyages! My old charts are full of your name.", 15_000, 700, -1), // 5.27: was 50 Spleef wins
             new Step(Kind.COUNT, "duel_win", 50, "Win 50 duels.", "The Duel Arena should name a pit after you.", 15_000, 700, 2),
             new Step(Kind.COUNT, "daily_quest", 30, "Complete 30 daily quests.", "Steady work, every day. That's how legends are made.", 15_000, 700, -1),
+            new Step(Kind.CHART, "*", 8, "Earn 8 stamps on Wren's Charts (/charts).",
+                    "Half the chart filled in by your hand. A true explorer.", 20_000, 800, 2), // 5.27
             new Step(Kind.CRAFTED, "diamond_block", 32, "Craft 32 diamond blocks.", "That's... that's a lot of diamonds, captain.", 25_000, 900, 2),
             new Step(Kind.LEVEL, "", 60, "Reach server level 60.", "There's no captain like you anywhere in the skies.", 30_000, 1_000, -1),
             new Step(Kind.SKILL, "50", 4, "Max out 4 skills.", "Four masteries. Only three to go.", 25_000, 900, 2),
@@ -119,7 +154,24 @@ public final class IslandQuests {
                     "You've done it. Every skill mastered, every trial passed. You're a Legend of the Skies - and this Legendary Key is yours.", 100_000, 2_000, 4));
 
     /** Where each chapter starts (step numbers) and its name. */
-    static final int[] CHAPTER_START = {1, 16, 36};
+    static final int[] CHAPTER_START = {1, 20, 46}; // 5.27: was {1, 16, 36}
+
+    /**
+     * 5.27: the per-player quest line's version (saved in wren-quests.json as "line"). Line 3 added these steps (in
+     * the new numbering, smallest first); players saved under line 2 move to the same quest in the new numbering.
+     */
+    static final int PLAYER_LINE = 3;
+    private static final int[] ADDED_V3 = {9, 11, 12, 17, 23, 28, 36, 37, 41, 42, 47, 59, 64};
+    /** Line 2's step 49 (50 Spleef wins) became "clear 10 expeditions" - anyone on it starts that count fresh. */
+    private static final int REPLACED_V3_OLD = 49;
+
+    /** A player's quest number saved under line 2, in line 3's numbering. */
+    static int migrateV3(int quest) {
+        if (quest <= 0) return quest;
+        int q = quest;
+        for (int added : ADDED_V3) if (q >= added) q++;
+        return q;
+    }
 
     /**
      * The quest line's version (saved with each island). Version 2 added Bedwars steps; islands saved
@@ -138,6 +190,18 @@ public final class IslandQuests {
         return q;
     }
     static final String[] CHAPTER_NAMES = {"Chapter 1: Settling In", "Chapter 2: The Captain's Trials", "Chapter 3: The Legend of the Skies"};
+
+    /** 5.27: the player's current quest task (Guide's "What next?" page), or null if not started / all done. */
+    public static String taskOf(UUID player) {
+        int quest = questOf(player);
+        if (quest < 1 || quest > STEPS.size()) return null;
+        return STEPS.get(quest - 1).task();
+    }
+
+    /** 5.27: how many quests there are. */
+    public static int questCount() {
+        return STEPS.size();
+    }
 
     /** Short progress text for the sidebar and Wren's menu (5.25: the player's own quest). */
     public static String progressShort(UUID player) {
@@ -301,6 +365,7 @@ public final class IslandQuests {
         loaded = true;
         com.google.gson.JsonObject root = com.aidan.skyserver.lobby.Stacks.readFile(FILE);
         if (root.has("players")) {
+            int line = root.has("line") ? root.get("line").getAsInt() : 2;
             for (Map.Entry<String, com.google.gson.JsonElement> e : root.getAsJsonObject("players").entrySet()) {
                 try {
                     com.google.gson.JsonObject o = e.getValue().getAsJsonObject();
@@ -309,9 +374,22 @@ public final class IslandQuests {
                     if (o.has("count")) q.count = o.get("count").getAsInt();
                     if (o.has("base")) q.base = o.get("base").getAsLong();
                     if (o.has("carry")) q.carry = o.get("carry").getAsLong();
+                    if (line < PLAYER_LINE) { // 5.27: same quest, new numbering
+                        int old = q.quest;
+                        q.quest = migrateV3(old);
+                        if (old == REPLACED_V3_OLD) {
+                            q.base = -1;
+                            q.carry = 0;
+                            q.count = 0;
+                        }
+                    }
                     PLAYERS.put(UUID.fromString(e.getKey()), q);
                 } catch (Exception ignored) {
                 }
+            }
+            if (line < PLAYER_LINE) {
+                com.aidan.skyserver.Skyserver.LOGGER.info("[SkyServer] Wren's quests: {} player(s) moved to the 5.27 quest line (same quest, new numbers).", PLAYERS.size());
+                save();
             }
             return;
         }
@@ -324,7 +402,7 @@ public final class IslandQuests {
             people.add(is.owner);
             for (UUID u : people) {
                 PQ q = new PQ();
-                q.quest = is.quest;
+                q.quest = migrateV3(is.quest); // islands still use the line-2 numbering
                 q.count = is.questCount;
                 Long base = is.questBase.get(u);
                 q.base = base == null ? -1 : base;
@@ -349,6 +427,7 @@ public final class IslandQuests {
             players.add(u.toString(), o);
         });
         root.add("players", players);
+        root.addProperty("line", PLAYER_LINE);
         com.aidan.skyserver.lobby.Stacks.writeFile(FILE, root);
     }
 
@@ -384,7 +463,16 @@ public final class IslandQuests {
 
     private static long stat(ServerPlayer p, Step s) {
         if (s.target.startsWith("#")) return 0;
-        if (s.kind == Kind.COUNT || s.kind == Kind.TOTAL) return com.aidan.skyserver.lobby.PlayerStats.get(p.getUUID(), s.target);
+        if (s.kind == Kind.COUNT || s.kind == Kind.TOTAL) {
+            long sum = 0; // 5.27: "a+b" adds counters
+            for (String k : s.target.split("\\+")) sum += com.aidan.skyserver.lobby.PlayerStats.get(p.getUUID(), k.trim());
+            return sum;
+        }
+        if (s.kind == Kind.CHART) {
+            if (s.target.equals("*")) return com.aidan.skyserver.lobby.Charts.count(p.getUUID());
+            for (String k : s.target.split(",")) if (com.aidan.skyserver.lobby.Charts.has(p.getUUID(), k.trim())) return 1;
+            return 0;
+        }
         if (s.kind == Kind.STAT) {
             var stat = switch (s.target) {
                 case "animals_bred" -> Stats.ANIMALS_BRED;
@@ -414,8 +502,11 @@ public final class IslandQuests {
      */
     private static long progress(ServerPlayer p, Islands.Island is, PQ q, Step s) {
         switch (s.kind) {
-            case TOTAL, SKILL -> {
+            case TOTAL, SKILL, CHART -> {
                 return stat(p, s);
+            }
+            case GOLEM -> { // 5.27: island thing
+                return Golems.data(is.id).golems.size();
             }
             case MINED, CRAFTED, STAT, COUNT -> {
                 long now = stat(p, s);

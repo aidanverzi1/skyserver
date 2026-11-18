@@ -83,6 +83,13 @@ public final class Charts {
         return mine != null && mine.contains(stamp);
     }
 
+    /** 5.27: how many chart stamps this player has (Wren's quests). */
+    public static int count(UUID id) {
+        load();
+        Set<String> mine = DATA.get(id);
+        return mine == null ? 0 : count(mine);
+    }
+
     private static int count(Set<String> mine) {
         int n = 0;
         for (String[] s : STAMPS) if (mine.contains(s[0])) n++;

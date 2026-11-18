@@ -88,6 +88,7 @@ public final class ExpeditionTest {
             if (s.getTickCount() % 5 != 0) return;
             load();
             if (!TESTS.isEmpty()) Safe.run("expedition test tick", ExpeditionTest::tick);
+            if (s.getTickCount() % 20 == 0 && server != null) Safe.run("real trip warning", ExpeditionTest::realTripWarning); // 5.27
         });
         CommandRegistrationCallback.EVENT.register((d, r, e) -> d.register(Commands.literal("ss")
                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
@@ -147,13 +148,30 @@ public final class ExpeditionTest {
             ServerPlayer p = EntityArgument.getPlayer(c, "p" + i);
             if (!crew.contains(p)) crew.add(p);
         }
+        String err = startFor(crew, kind, d);
+        if (err != null) {
+            src.sendFailure(Component.literal(err));
+            return 0;
+        }
+        List<String> names = new ArrayList<>();
+        for (ServerPlayer p : crew) names.add(p.getName().getString());
+        src.sendSuccess(() -> Component.literal("Started a test " + what(kind, d) + " for " + String.join(", ", names) + "."), true);
+        return 1;
+    }
+
+    private static String what(String kind, int d) {
+        return kind.equals("end") ? "End Expedition" : DIFFS[d] + " " + (kind.equals("nether") ? "Nether Expedition" : kind.equals("city") ? "Ancient City" : "Sunken Monument");
+    }
+
+    /**
+     * 5.27: starts a test trip (the /ss test command and the op button in Wren's menu both come here).
+     * Returns null if it started, otherwise why not (nothing changed then).
+     */
+    public static String startFor(List<ServerPlayer> crew, String kind, int d) {
         for (ServerPlayer p : crew) {
             String why = p instanceof BotPlayer ? "is a bot" : isTesting(p.getUUID()) ? "is already on a test trip"
                     : !Islands.isIsland(p.level()) ? "must be on the island world" : onAnyTrip(p.getUUID()) ? "is already on an expedition" : null;
-            if (why != null) {
-                src.sendFailure(Component.literal(p.getName().getString() + " " + why + "."));
-                return 0;
-            }
+            if (why != null) return p.getName().getString() + " " + why + ".";
         }
         // Save everyone first (so nothing they earn from here on counts), then start the trip.
         for (ServerPlayer p : crew) save(p, kind, d);
@@ -171,10 +189,9 @@ public final class ExpeditionTest {
         }
         if (err != null) {
             for (ServerPlayer p : crew) restore(p);
-            src.sendFailure(Component.literal("The test didn't start: " + err));
-            return 0;
+            return "The test didn't start: " + err;
         }
-        String what = kind.equals("end") ? "End Expedition" : DIFFS[d] + " " + (kind.equals("nether") ? "Nether Expedition" : kind.equals("city") ? "Ancient City" : "Sunken Monument");
+        String what = what(kind, d);
         List<String> names = new ArrayList<>();
         for (ServerPlayer p : crew) names.add(p.getName().getString());
         for (ServerPlayer p : crew) {
@@ -182,9 +199,8 @@ public final class ExpeditionTest {
                     + "The gear for this trip arrives when you land. §cNo rewards §7on a test trip, and anything you bring home is wiped.");
             p.closeContainer();
         }
-        src.sendSuccess(() -> Component.literal("Started a test " + what + " for " + String.join(", ", names) + "."), true);
         Skyserver.LOGGER.info("[Test] {} test started for {}", what, names);
-        return 1;
+        return null;
     }
 
     private static boolean onAnyTrip(UUID id) {
@@ -212,6 +228,31 @@ public final class ExpeditionTest {
     // =====================================================================
     // Every quarter second: the kit on landing, the inventory back at home
     // =====================================================================
+
+    /** 5.27: ops already warned that this trip is a REAL one (cleared once they're back on the island world). */
+    private static final Set<UUID> WARNED_REAL = new HashSet<>();
+
+    /**
+     * 5.27: an op who lands on a REAL expedition (not a test) gets a big warning 3 s after landing, so a forgotten
+     * /ss test can't quietly cost their inventory. Players who aren't ops never see it.
+     */
+    private static void realTripWarning() {
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            if (p instanceof BotPlayer) continue;
+            UUID id = p.getUUID();
+            if (expeditionWorld(p.level()) == null) {
+                if (Islands.isIsland(p.level())) WARNED_REAL.remove(id);
+                continue;
+            }
+            if (TESTS.containsKey(id) || WARNED_REAL.contains(id) || !com.aidan.skyserver.lobby.Mods.isOp(p)) continue;
+            WARNED_REAL.add(id);
+            Lobby.runLaterTicks(60, () -> {
+                if (p.hasDisconnected() || expeditionWorld(p.level()) == null) return;
+                com.aidan.skyserver.lobby.Announce.title(p, "§c§lREAL TRIP", "§7Not a test - dying can cost what you carry", 5, 70, 15);
+                Lobby.msg(p, "§c§l[REAL TRIP] §7This is not a test trip. Test trips: §eWren's menu -> Test trip §7or §e/ss test§7.");
+            });
+        }
+    }
 
     private static void tick() {
         if (server == null) return;

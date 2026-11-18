@@ -595,7 +595,7 @@ public final class Lobby {
         inv.setItem(8, Stacks.tag(Stacks.named(new ItemStack(Items.TRIPWIRE_HOOK), "§e§lYour Keys",
                 Keys.COLORS[0] + "Common: §f" + k[0], Keys.COLORS[1] + "Uncommon: §f" + k[1], Keys.COLORS[2] + "Rare: §f" + k[2],
                 Keys.COLORS[3] + "Epic: §f" + k[3], Keys.COLORS[4] + "Legendary: §f" + k[4], "§7Use them on the chests in the Great Hall."), "keys"));
-        inv.setItem(7, Guide.book());
+        inv.setItem(7, Guide.book(p)); // 5.27: with their own "What next?" page
         if (Parkour.running(p)) {
             inv.setItem(3, Stacks.tag(Stacks.named(new ItemStack(Items.FEATHER), "§bBack to checkpoint §7(right-click)"), "checkpoint"));
             inv.setItem(5, Stacks.tag(Stacks.named(new ItemStack(Items.BARRIER), "§cQuit course §7(right-click)"), "quit"));
