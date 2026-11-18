@@ -19,6 +19,7 @@ public final class IslandMenu extends LockedMenu {
     private static final int SIZE = 28, GEN = 30, CROPS = 32, EXTRA = 34, HELP = 40, SPEED = 39;
     private static final int[] EGG_SLOTS = {37, 38, 42, 43};
     private static final int PLANTER = 18, PLANTER_SPEED = 26; // 5.24b: Little Snack Planters
+    private static final int GOLEMS = 41; // 5.26: copper golem upgrades
     private static final net.minecraft.world.item.Item[] EGGS = {Items.SHEEP_SPAWN_EGG, Items.COW_SPAWN_EGG, Items.CHICKEN_SPAWN_EGG, Items.PIG_SPAWN_EGG};
     private static final String[] EGG_NAMES = {"Sheep", "Cow", "Chicken", "Pig"};
     private static final long[] EGG_PRICES = {400, 400, 250, 350};
@@ -97,6 +98,7 @@ public final class IslandMenu extends LockedMenu {
                     "§7Price: §6" + Economy.format(EGG_PRICES[i]), money, "§eClick to buy one"));
         box.setItem(PLANTER, com.aidan.skyserver.pet.Planters.buyIcon(viewer, is));
         box.setItem(PLANTER_SPEED, com.aidan.skyserver.pet.Planters.upgradeIcon(is));
+        box.setItem(GOLEMS, GolemMenus.upgradeIcon(is, viewer));
         frame(Stacks.named(new ItemStack(Items.STAINED_GLASS_PANE.pick(DyeColor.LIGHT_BLUE)), " "));
         broadcastChanges();
     }
@@ -127,6 +129,7 @@ public final class IslandMenu extends LockedMenu {
             case HELP -> Lobby.later(viewer, () -> Islands.help(viewer));
             case PLANTER -> result = com.aidan.skyserver.pet.Planters.buy(viewer, is);
             case PLANTER_SPEED -> result = com.aidan.skyserver.pet.Planters.upgrade(viewer, is);
+            case GOLEMS -> result = Golems.buyUpgrade(viewer, is);
             default -> {
                 int egg = -1;
                 for (int i = 0; i < EGG_SLOTS.length; i++) if (EGG_SLOTS[i] == slot) egg = i;

@@ -31,6 +31,10 @@ import java.util.function.Predicate;
  *  - Each player can store at most the Nightmare amount of each item (it's not a free vault).
  *  - When a trip leaves, Wren takes each crew member's items from the host island's chests.
  * Saved in config/skyserver/tribute.json as island id -> chest -> player -> item id -> count.
+ *
+ * 5.26: the ISLAND POOL - what copper golems (Tribute Runner errand) bring. It's kept under the POOL id in
+ * chest 1 and ANY member of that island can use it: it counts toward their fare, Wren takes from it after
+ * their own share, and they can take it back out of the chest screen (after their own share).
  */
 public final class Tribute {
     private Tribute() {}
@@ -83,6 +87,9 @@ public final class Tribute {
             new Need("cane", "Sugar Cane", Items.SUGAR_CANE, i -> i == Items.SUGAR_CANE, steps(64)));
             // 5.25: Nightmare's 16 diamonds are gone - every fare is now the same farm items, scaled to the cash.
 
+    /** 5.26: the island pool's "player" id (golem deliveries, shared by every island member). */
+    public static final UUID POOL = new UUID(0L, 0xC0FFEE5L);
+
     /** island -> chest -> player -> item id -> count */
     private static final Map<Integer, Map<Integer, Map<UUID, Map<String, Integer>>>> DATA = new HashMap<>();
     private static boolean loaded = false;
@@ -118,11 +125,36 @@ public final class Tribute {
         return t;
     }
 
-    /** How many of this need the player has in all of an island's tribute chests. */
+    /** How many of this need the player has in all of an island's tribute chests (5.26: + the island pool for members). */
     public static int total(int island, UUID who, Need n) {
         int t = 0;
         for (int c = 0; c < CHESTS; c++) t += inChest(island, c, who, n);
+        if (!POOL.equals(who) && poolUser(island, who)) t += poolCount(island, n);
         return t;
+    }
+
+    /** 5.26: may this player use the island pool (a member of that island)? */
+    static boolean poolUser(int island, UUID who) {
+        Islands.Island is = islandById(island);
+        return is != null && is.isMember(who);
+    }
+
+    /** 5.26: how many of this need are in the island pool. */
+    public static int poolCount(int island, Need n) {
+        return inChest(island, 0, POOL, n);
+    }
+
+    /** 5.26: a copper golem puts a stack in the island pool (up to the Nightmare amount per item). Returns how many went in. */
+    public static int poolDeposit(int island, ItemStack st) {
+        if (st.isEmpty()) return 0;
+        Need n = needFor(st.getItem());
+        if (n == null) return 0;
+        int move = Math.min(n.max() - poolCount(island, n), st.getCount());
+        if (move <= 0) return 0;
+        share(island, 0, POOL, true).merge(id(st.getItem()), move, Integer::sum);
+        st.shrink(move);
+        save();
+        return move;
     }
 
     /** The needs this player hasn't filled yet for a difficulty on this island ("Iron Ingots 40/64", ...). */
@@ -150,6 +182,19 @@ public final class Tribute {
             int left = n.amount(diff);
             for (int c = 0; c < CHESTS && left > 0; c++) {
                 Map<String, Integer> s = share(island, c, who, true);
+                for (String k : new ArrayList<>(s.keySet())) {
+                    if (left <= 0) break;
+                    if (!n.match.test(item(k))) continue;
+                    int use = Math.min(left, s.get(k));
+                    left -= use;
+                    taken.merge(k, use, Integer::sum);
+                    if (s.get(k) - use <= 0) s.remove(k);
+                    else s.put(k, s.get(k) - use);
+                }
+            }
+            // 5.26: then the island pool (golem deliveries), if this player is on that island.
+            if (left > 0 && poolUser(island, who)) {
+                Map<String, Integer> s = share(island, 0, POOL, true);
                 for (String k : new ArrayList<>(s.keySet())) {
                     if (left <= 0) break;
                     if (!n.match.test(item(k))) continue;
@@ -213,6 +258,7 @@ public final class Tribute {
                     "§7Captain Wren takes these items as the", "§7fare for a §bSunken Monument Expedition§7.",
                     "§fClick an item in your inventory §7to put it in.", "§fClick a slot §7to take a stack back §8(shift: all)§7.",
                     "§7You can only take out what §fyou §7put in.", "§7All 3 chests count together.",
+                    "§6Island pool: §7what copper golems bring.", "§7Any island member can use it.",
                     "§7Coming from another island? Put your", "§7items in the §fhost's §7chests."));
             for (int i = 0; i < NEEDS.size() && i < SLOTS.length; i++) {
                 Need n = NEEDS.get(i);
@@ -220,6 +266,7 @@ public final class Tribute {
                 ItemStack icon = new ItemStack(n.icon, Math.max(1, Math.min(64, here)));
                 box.setItem(SLOTS[i], Stacks.named(icon, (need == 0 ? "§8" : all >= need ? "§a✔ " : "§c✘ ") + "§f" + n.name,
                         "§7In this chest (yours): §f" + here, "§7In all 3 chests: §f" + all,
+                        poolUser(island, me) && poolCount(island, n) > 0 ? "§6Island pool (golems): §f" + poolCount(island, n) + (chest == 0 ? "" : " §8(take it out in chest 1)") : "§8Island pool (golems): 0",
                         need == 0 ? "§8Not needed on this difficulty" : "§7Needed: §f" + need + (all >= need ? " §a(done)" : " §c(" + (need - all) + " more)"),
                         "§8Most you can store: " + n.max(), "§eClick: take back 64 §8| §eShift-click: take back all"));
             }
@@ -300,7 +347,15 @@ public final class Tribute {
         }
 
         private void withdraw(Need n, int max) {
-            Map<String, Integer> s = share(island, chest, viewer.getUUID(), true);
+            int[] got = withdrawFrom(share(island, chest, viewer.getUUID(), true), n, max);
+            // 5.26: then the island pool (golem deliveries) - only from chest 1, only for members.
+            if (got[1] > 0 && chest == 0 && poolUser(island, viewer.getUUID())) got[0] += withdrawFrom(share(island, 0, POOL, true), n, got[1])[0];
+            save();
+            Announce.actionBar(viewer, got[0] > 0 ? "§aTook back " + got[0] + " " + n.name : "§7Nothing of yours to take (or your inventory is full).");
+        }
+
+        /** Gives up to max of this need from one share. Returns {given, still wanted (0 if the inventory filled up)}. */
+        private int[] withdrawFrom(Map<String, Integer> s, Need n, int max) {
             int left = max, gave = 0;
             for (String k : new ArrayList<>(s.keySet())) {
                 if (left <= 0) break;
@@ -320,8 +375,7 @@ public final class Tribute {
                 if (have <= 0) s.remove(k);
                 else s.put(k, have);
             }
-            save();
-            Announce.actionBar(viewer, gave > 0 ? "§aTook back " + gave + " " + n.name : "§7Nothing of yours to take (or your inventory is full).");
+            return new int[]{gave, left};
         }
     }
 
@@ -333,7 +387,7 @@ public final class Tribute {
         if (b == null) return 0;
         int stacks = 0;
         for (UUID who : new ArrayList<>(b.keySet())) {
-            if (is.isMember(who)) continue;
+            if (is.isMember(who) || POOL.equals(who)) continue;
             for (Map.Entry<String, Integer> e : b.get(who).entrySet()) {
                 Item it = item(e.getKey());
                 int left = e.getValue();

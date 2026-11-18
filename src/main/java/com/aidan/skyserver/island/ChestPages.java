@@ -79,7 +79,12 @@ public final class ChestPages {
             BlockState state = level.getBlockState(pos);
             ItemStack held = sp.getItemInHand(hand);
             if (state.is(Blocks.CHEST)) {
-                if (sp.isSecondaryUseActive() && !held.isEmpty()) return InteractionResult.PASS; // sneaking to place
+                // 5.26: sneak-click with an empty hand (or an item that can't be placed) = the copper golem label menu.
+                if (sp.isSecondaryUseActive()) {
+                    if (!held.isEmpty() && !Golems.opensMenu(held)) return InteractionResult.PASS; // sneaking to place
+                    if (hand != InteractionHand.MAIN_HAND) return InteractionResult.SUCCESS;
+                    return GolemMenus.openLabels(sp, (ServerLevel) level, pos) ? InteractionResult.SUCCESS : InteractionResult.PASS;
+                }
                 if (hand != InteractionHand.MAIN_HAND) return InteractionResult.SUCCESS;
                 if (ChestBlock.isChestBlockedAt(level, pos)) return InteractionResult.PASS; // vanilla says "blocked"
                 open(sp, (ServerLevel) level, pos);
@@ -198,6 +203,35 @@ public final class ChestPages {
         }
         if (last && !at.isEmpty() && level.getBlockState(at.get(0)).is(Blocks.CHEST))
             level.playSound(null, at.get(0), SoundEvents.CHEST_CLOSE, SoundSource.BLOCKS, 0.5f, level.getRandom().nextFloat() * 0.1f + 0.9f);
+    }
+
+    /**
+     * 5.26: a copper golem opens a chest for a moment (lid + sound), then closes it again - unless a player is
+     * looking into it by then (their screen keeps it open).
+     */
+    static void golemLid(ServerLevel level, BlockPos pos, int ticks) {
+        BlockState st = level.getBlockState(pos);
+        if (!(st.getBlock() instanceof ChestBlock)) return;
+        List<BlockPos> at = new ArrayList<>();
+        if (st.is(Blocks.CHEST)) for (BlockEntity be : halves(level, pos)) at.add(be.getBlockPos().immutable());
+        if (at.isEmpty()) at.add(pos.immutable());
+        for (BlockPos h : at) level.blockEvent(h, level.getBlockState(h).getBlock(), 1, 1);
+        level.playSound(null, pos, SoundEvents.CHEST_OPEN, SoundSource.BLOCKS, 0.35f, 1.3f);
+        Lobby.runLaterTicks(ticks, () -> {
+            for (BlockPos h : at) {
+                Set<UUID> who = VIEWERS.get(h.asLong());
+                if (level.getBlockState(h).getBlock() instanceof ChestBlock) level.blockEvent(h, level.getBlockState(h).getBlock(), 1, who == null ? 0 : who.size());
+            }
+            level.playSound(null, pos, SoundEvents.CHEST_CLOSE, SoundSource.BLOCKS, 0.35f, 1.3f);
+        });
+    }
+
+    /** 5.26: both halves of a chest (or just the one), for the golem code. */
+    static List<BlockPos> halfPositions(ServerLevel level, BlockPos pos) {
+        List<BlockPos> out = new ArrayList<>();
+        for (BlockEntity be : halves(level, pos)) out.add(be.getBlockPos().immutable());
+        if (out.isEmpty()) out.add(pos.immutable());
+        return out;
     }
 
     // ---- Sorting ----

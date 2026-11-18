@@ -309,6 +309,7 @@ public final class Islands {
         IslandTime.init();
         protection();
         ChestPages.init(); // 5.10: paged chests with a sort button (after protection, so its checks run first)
+        Golems.init();     // 5.26: copper golems (labels, hub, jobs, courier) - after protection too
         net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((d, r, e) -> registerCommands(d));
         net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((d, r, e) -> d.register(Commands.literal("ic")
                 .then(Commands.argument("message", StringArgumentType.greedyString())
@@ -1106,7 +1107,7 @@ public final class Islands {
 
     // ---- Shared upgrade fund ----
 
-    private static String fundNote(Island is) {
+    static String fundNote(Island is) {
         return is.fund > 0 ? " §7(island fund has " + Economy.format(is.fund) + ", you pay the rest)" : "";
     }
 
@@ -1114,7 +1115,7 @@ public final class Islands {
      * Pays for an upgrade from the island fund first, then the buyer's own money for whatever's left.
      * 5.8: an Island Upgrade Voucher (Epic chest prize) takes 25% off the next upgrade.
      */
-    private static boolean payUpgrade(ServerPlayer p, Island is, long price) {
+    static boolean payUpgrade(ServerPlayer p, Island is, long price) {
         boolean voucher = price > 0 && Tokens.count(p.getUUID(), Tokens.UPGRADE_VOUCHER) > 0;
         if (voucher) price = Math.round(price * 0.75);
         long fromFund = Math.min(is.fund, price);
@@ -1927,6 +1928,8 @@ public final class Islands {
                 "§e/is theme §7- change your island's look (needs a theme token)",
                 "§e/is expedition §7- start a Nether Expedition (or talk to Wren for every expedition)",
                 "§e/claim §7- collect mystery chest prizes on your island",
+                "§e/parcels §7- parcels copper golems brought you (or sneak-click your copper chest)",
+                "§7Copper golems: sneak-click a chest to label it, sneak-click a copper chest for the golem hub",
                 "§e/lobby §7- back to the lobby (stand still 5 seconds)"};
         for (String l : lines) Lobby.msg(p, l);
     }
